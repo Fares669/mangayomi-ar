@@ -1,21 +1,21 @@
 const mangayomiSources = [{
-    "name": "WitAnime",
+    "name": "Anime4Up",
     "lang": "ar",
-    "baseUrl": "https://witanime.you",
+    "baseUrl": "https://w1.anime4up.rest",
     "apiUrl": "",
-    "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
+    "iconUrl": "https://w1.anime4up.rest/wp-content/uploads/2026/04/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.4",
+    "version": "0.0.1",
     "pkgPath": "",
-    "notes": "WitAnime JS Extension with custom StreamWish/Mp4Upload extractors and latest updates fix"
+    "notes": "Anime4Up JS Extension with custom extractors for Share4max, Larhu, StreamWish, Mp4Upload, VOE, and Uqload"
 }];
 
 class DefaultExtension extends MProvider {
     getHeaders(url) {
         return {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://witanime.you/"
+            "Referer": "https://w1.anime4up.rest/"
         };
     }
     
@@ -66,8 +66,8 @@ class DefaultExtension extends MProvider {
     async getPopular(page) {
         const client = new Client();
         const url = page === 1 
-            ? "https://witanime.you/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8a/"
-            : `https://witanime.you/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8a/page/${page}/`;
+            ? "https://w1.anime4up.rest/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8I/"
+            : `https://w1.anime4up.rest/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8I/page/${page}/`;
             
         const res = await client.get(url, this.getHeaders(url));
         if (res.statusCode !== 200) {
@@ -85,7 +85,7 @@ class DefaultExtension extends MProvider {
             if (titleEl && imgEl) {
                 const name = titleEl.text.trim();
                 const link = titleEl.getHref || (overlayEl ? overlayEl.getHref : "");
-                const imageUrl = imgEl.getSrc || imgEl.attr('src') || "";
+                const imageUrl = imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "";
                 list.push({
                     name: name,
                     link: link,
@@ -106,8 +106,8 @@ class DefaultExtension extends MProvider {
     async getLatestUpdates(page) {
         const client = new Client();
         const url = page === 1 
-            ? "https://witanime.you/episode/"
-            : `https://witanime.you/episode/page/${page}/`;
+            ? "https://w1.anime4up.rest/episode/"
+            : `https://w1.anime4up.rest/episode/page/${page}/`;
             
         const res = await client.get(url, this.getHeaders(url));
         if (res.statusCode !== 200) {
@@ -120,15 +120,15 @@ class DefaultExtension extends MProvider {
         for (const card of cards) {
             const titleEl = card.selectFirst('div.anime-card-details div.anime-card-title h3 a');
             const imgEl = card.selectFirst('div.anime-card-poster img');
-            const epEl = card.selectFirst('div.episodes-card-title h3 a');
+            const epEl = card.selectFirst('div.anime-card-poster div.ep_num a') || card.selectFirst('div.episodes-card-title h3 a');
             
             if (titleEl && imgEl) {
                 let name = titleEl.text.trim();
                 if (epEl) {
-                    name = name + " - " + epEl.text.trim();
+                    name = name + " - " + epEl.text.trim().replace(/\s+/g, ' ');
                 }
-                const link = titleEl.getHref || "";
-                const imageUrl = imgEl.getSrc || imgEl.attr('src') || "";
+                const link = epEl ? epEl.getHref : (titleEl.getHref || "");
+                const imageUrl = imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "";
                 list.push({
                     name: name,
                     link: link,
@@ -152,8 +152,8 @@ class DefaultExtension extends MProvider {
         
         if (query && query.trim().length > 0) {
             url = page === 1
-                ? `https://witanime.you/?s=${encodeURIComponent(query)}&search_param=animes`
-                : `https://witanime.you/page/${page}/?s=${encodeURIComponent(query)}&search_param=animes`;
+                ? `https://w1.anime4up.rest/?s=${encodeURIComponent(query)}`
+                : `https://w1.anime4up.rest/page/${page}/?s=${encodeURIComponent(query)}`;
         } else {
             let filterPath = "";
             if (filters && filters.length > 0) {
@@ -166,8 +166,8 @@ class DefaultExtension extends MProvider {
             }
             if (filterPath.length > 0) {
                 url = page === 1
-                    ? `https://witanime.you/${filterPath}`
-                    : `https://witanime.you/${filterPath}page/${page}/`;
+                    ? `https://w1.anime4up.rest/${filterPath}`
+                    : `https://w1.anime4up.rest/${filterPath}page/${page}/`;
             } else {
                 return await this.getPopular(page);
             }
@@ -192,7 +192,7 @@ class DefaultExtension extends MProvider {
             if (titleEl && imgEl) {
                 const name = titleEl.text.trim();
                 const link = titleEl.getHref || (overlayEl ? overlayEl.getHref : "");
-                const imageUrl = imgEl.getSrc || imgEl.attr('src') || "";
+                const imageUrl = imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "";
                 list.push({
                     name: name,
                     link: link,
@@ -222,8 +222,8 @@ class DefaultExtension extends MProvider {
         const titleEl = doc.selectFirst('h1.anime-details-title');
         const name = titleEl ? titleEl.text.trim() : "";
         
-        const imgEl = doc.selectFirst('img.thumbnail.img-responsive');
-        const imageUrl = imgEl ? (imgEl.getSrc || imgEl.attr('src') || "") : "";
+        const imgEl = doc.selectFirst('img.thumbnail.img-responsive') || doc.selectFirst('img.thumbnail');
+        const imageUrl = imgEl ? (imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "") : "";
         
         const descEl = doc.selectFirst('p.anime-story');
         const description = descEl ? descEl.text.trim() : "";
@@ -235,40 +235,46 @@ class DefaultExtension extends MProvider {
         }
         
         let status = 5;
-        const statusElement = doc.selectFirst('a[href*="/anime-status/"]');
-        if (statusElement) {
-            const statusText = statusElement.text.trim();
-            if (statusText.includes("يعرض الان")) {
-                status = 0;
-            } else if (statusText.includes("مكتمل")) {
-                status = 1;
+        
+        const chapters = [];
+        let page = 1;
+        let hasNextPage = true;
+        
+        while (hasNextPage) {
+            const pageUrl = page === 1 ? url : `${url.replace(/\/$/, '')}/page/${page}/`;
+            const pageRes = await client.get(pageUrl, this.getHeaders(pageUrl));
+            if (pageRes.statusCode !== 200) {
+                break;
             }
+            
+            const pageDoc = new Document(pageRes.body);
+            const cards = pageDoc.select('div#episodesList div.pinned-card');
+            if (cards.length === 0) {
+                break;
+            }
+            
+            for (const card of cards) {
+                const img_a = card.selectFirst('a.image');
+                const ep_span = card.selectFirst('a.badge span') || card.selectFirst('a.badge');
+                const ep_name = ep_span ? ep_span.text.trim().replace(/\s+/g, ' ') : "";
+                const ep_url = img_a ? img_a.getHref : "";
+                const thumbnail = img_a ? (img_a.attr('data-src') || img_a.attr('data-image') || img_a.getSrc || "") : "";
+                
+                chapters.push({
+                    name: ep_name,
+                    url: ep_url,
+                    thumbnailUrl: thumbnail
+                });
+            }
+            
+            const nextEl = pageDoc.selectFirst('a.next.page-numbers');
+            hasNextPage = nextEl !== null;
+            page++;
+            
+            if (page > 50) break;
         }
         
-        const html = res.body;
-        const match = html.match(/processedEpisodeData\s*=\s*'([^']+)'/);
-        const chapters = [];
-        if (match) {
-            const processedEpisodeData = match[1];
-            const parts = processedEpisodeData.split('.');
-            if (parts.length === 2) {
-                const key = this.base64Decode(parts[1]);
-                const encryptedBytes = this.base64ToBytes(parts[0]);
-                let decryptedStr = "";
-                for (let i = 0; i < encryptedBytes.length; i++) {
-                    decryptedStr += String.fromCharCode(encryptedBytes[i] ^ key.charCodeAt(i % key.length));
-                }
-                const episodes = JSON.parse(decryptedStr);
-                for (let i = 0; i < episodes.length; i++) {
-                    const ep = episodes[i];
-                    chapters.push({
-                        name: ep.type + " " + ep.number,
-                        url: ep.url,
-                        thumbnailUrl: ep.screenshot
-                    });
-                }
-            }
-        }
+        chapters.reverse();
         
         return {
             name: name,
@@ -285,7 +291,7 @@ class DefaultExtension extends MProvider {
         const client = new Client();
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://witanime.you/"
+            "Referer": "https://w1.anime4up.rest/"
         };
         const res = await client.get(url, headers);
         if (res.statusCode !== 200) {
@@ -407,7 +413,6 @@ class DefaultExtension extends MProvider {
         let html = res.body;
         let script = "";
         
-        // Try packed first
         const match = html.match(/eval\(function\(p,a,c,k,e,d\).*?return p\}\('(.*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'(.*?)'\.split\('\|'\)/s);
         if (match) {
             let p = match[1];
@@ -432,7 +437,6 @@ class DefaultExtension extends MProvider {
             }
             script = p;
         } else {
-            // Search individual script tags for player.src
             const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
             let m;
             while ((m = scriptRegex.exec(html)) !== null) {
@@ -470,6 +474,232 @@ class DefaultExtension extends MProvider {
         }];
     }
     
+    async customShare4maxExtractor(url, prefix) {
+        const client = new Client();
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://w1.anime4up.rest/"
+        };
+        const res = await client.get(url, headers);
+        if (res.statusCode !== 200) return [];
+        
+        const html = res.body;
+        const versionMatch = html.match(/"version"\s*:\s*["']([a-fA-F0-9]+)["']/);
+        if (!versionMatch) return [];
+        const version = versionMatch[1];
+        
+        const inertiaHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": url,
+            "X-Inertia": "true",
+            "X-Inertia-Version": version,
+            "X-Inertia-Partial-Component": "files/mirror/video",
+            "X-Inertia-Partial-Data": "streams",
+            "X-Requested-With": "XMLHttpRequest"
+        };
+        
+        const inertiaRes = await client.get(url, inertiaHeaders);
+        if (inertiaRes.statusCode !== 200) return [];
+        
+        const data = JSON.parse(inertiaRes.body);
+        const streams = data.props && data.props.streams ? data.props.streams.data : [];
+        const videos = [];
+        
+        for (const stream of streams) {
+            const label = stream.label || "HD";
+            const mirrors = stream.mirrors || [];
+            
+            for (const mirror of mirrors) {
+                let link = mirror.link;
+                if (!link) continue;
+                if (link.startsWith("//")) link = "https:" + link;
+                
+                const driver = mirror.driver || "mirror";
+                const qLabel = `${prefix} (${label} - ${driver})`;
+                
+                if (driver.includes("stream") || driver.includes("wish") || link.includes("streamwish") || link.includes("hgcloud.to")) {
+                    try {
+                        const wish = await this.customStreamWishExtractor(link, qLabel);
+                        if (wish) videos.push(...wish);
+                    } catch (e) {}
+                } else if (driver.includes("mp4upload") || link.includes("mp4upload.com")) {
+                    try {
+                        const mp4 = await this.customMp4UploadExtractor(link, qLabel);
+                        if (mp4) videos.push(...mp4);
+                    } catch (e) {}
+                } else if (driver.includes("voe") || link.includes("voe.sx")) {
+                    try {
+                        const voe = await this.customVoeExtractor(link, qLabel);
+                        if (voe) videos.push(...voe);
+                    } catch (e) {}
+                } else if (driver.includes("uqload") || link.includes("uqload")) {
+                    try {
+                        const uq = await this.customUqloadExtractor(link, qLabel);
+                        if (uq) videos.push(...uq);
+                    } catch (e) {}
+                }
+            }
+        }
+        
+        return videos;
+    }
+    
+    async customLarhuExtractor(url, prefix) {
+        const client = new Client();
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://w1.anime4up.rest/"
+        };
+        const res = await client.get(url, headers);
+        if (res.statusCode !== 200) return [];
+        
+        const html = res.body;
+        const fileMatch = html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/);
+        if (!fileMatch) return [];
+        
+        const fileUrl = fileMatch[1];
+        
+        return [{
+            url: fileUrl,
+            quality: `${prefix} - Larhu`,
+            originalUrl: fileUrl,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": url
+            }
+        }];
+    }
+    
+    async customVoeExtractor(url, prefix) {
+        const client = new Client();
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://w1.anime4up.rest/"
+        };
+        
+        let res = await client.get(url, headers);
+        if (res.statusCode !== 200) return [];
+        
+        let html = res.body;
+        const redirectMatch = html.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/);
+        let finalUrl = url;
+        if (redirectMatch) {
+            finalUrl = redirectMatch[1];
+            res = await client.get(finalUrl, headers);
+            if (res.statusCode !== 200) return [];
+            html = res.body;
+        }
+        
+        const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+        let m;
+        let obfStr = "";
+        while ((m = scriptRegex.exec(html)) !== null) {
+            const content = m[1].trim();
+            if (content.startsWith('[') && content.endsWith(']') && content.includes('DQAk#&')) {
+                const arr = JSON.parse(content);
+                if (arr && arr.length > 0) {
+                    obfStr = arr[0];
+                    break;
+                }
+            }
+        }
+        
+        if (!obfStr) return [];
+        
+        const step1 = this.rot13(obfStr);
+        const step2 = this.replacePatterns(step1);
+        const step3 = this.base64Decode(step2);
+        const step4 = this.shiftChars(step3, 3);
+        const step5 = step4.split("").reverse().join("");
+        const step6 = this.base64Decode(step5);
+        
+        const videoData = JSON.parse(step6);
+        const sourceUrl = videoData.source;
+        if (!sourceUrl) return [];
+        
+        return [{
+            url: sourceUrl,
+            quality: `${prefix} - VOE`,
+            originalUrl: sourceUrl,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": finalUrl
+            }
+        }];
+    }
+    
+    rot13(text) {
+        return text.replace(/[a-zA-Z]/g, function (c) {
+            return String.fromCharCode((c <= "Z" ? 90 : 122) >= (c = c.charCodeAt(0) + 13) ? c : c - 26);
+        });
+    }
+
+    replacePatterns(txt) {
+        const pats = ['@$', '^^', '~@', '%?', '*~', '!!', '#&'];
+        for (const pat of pats) {
+            txt = txt.replaceAll(pat, '');
+        }
+        return txt;
+    }
+
+    shiftChars(text, shift) {
+        let out = "";
+        for (let i = 0; i < text.length; i++) {
+            out += String.fromCharCode(text.charCodeAt(i) - shift);
+        }
+        return out;
+    }
+    
+    async customUqloadExtractor(url, prefix) {
+        const client = new Client();
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://w1.anime4up.rest/"
+        };
+        const res = await client.get(url, headers);
+        if (res.statusCode !== 200) return [];
+        
+        const html = res.body;
+        const match = html.match(/eval\(function\(p,a,c,k,e,d\).*?return p\}\('(.*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'(.*?)'\.split\('\|'\)/s);
+        if (!match) return [];
+        
+        let p = match[1];
+        const a = parseInt(match[2], 10);
+        const c = parseInt(match[3], 10);
+        const k = match[4].split('|');
+        
+        function baseN(num, b) {
+            const chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            if (num < b) {
+                return chars[num];
+            }
+            return baseN(Math.floor(num / b), b) + chars[num % b];
+        }
+        
+        for (let i = c - 1; i >= 0; i--) {
+            if (k[i]) {
+                const baseValue = baseN(i, a);
+                const regex = new RegExp('\\b' + baseValue + '\\b', 'g');
+                p = p.replace(regex, () => k[i]);
+            }
+        }
+        
+        const srcMatch = p.match(/file\s*:\s*["'](https?:\/\/[&A-Za-z0-9_.\-\/\?#=]+)["']/);
+        if (!srcMatch) return [];
+        
+        const fileUrl = srcMatch[1];
+        
+        return [{
+            url: fileUrl,
+            quality: `${prefix} - Uqload`,
+            originalUrl: fileUrl,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": url
+            }
+        }];
+    }
+    
     async getVideoList(url) {
         const client = new Client();
         const res = await client.get(url, this.getHeaders(url));
@@ -477,116 +707,66 @@ class DefaultExtension extends MProvider {
             throw new Error(`Failed to fetch episode page: ${res.statusCode}`);
         }
         
-        const html = res.body;
-        const zgMatch = html.match(/_zG\s*=\s*["']([^"']+)["']/);
-        const zhMatch = html.match(/_zH\s*=\s*["']([^"']+)["']/);
-        if (!zgMatch || !zhMatch) {
-            return [];
-        }
-        
-        const zgVal = zgMatch[1];
-        const zhVal = zhMatch[1];
-        const resourceRegistry = JSON.parse(this.base64Decode(zgVal));
-        const configRegistry = JSON.parse(this.base64Decode(zhVal));
-        
-        const doc = new Document(html);
-        const serverElements = doc.select('a.server-link');
+        const doc = new Document(res.body);
+        const serverElements = doc.select('ul#episode-servers li');
         const videos = [];
-        const apiKey = "23a97133-caf3-4eb4-9466-93d0a4ff8198";
-        const wishDomains = ["streamwish", "hgcloud.to", "hgplaycdn.com", "hglamioz.com", "niramirus.com", "playnixes.com", "medixiru.com", "hanerix.com", "audinifer.com", "vibuxer.com", "masukestin.com"];
         
         for (const element of serverElements) {
-            const serverIdStr = element.attr('data-server-id');
-            if (!serverIdStr) continue;
+            const embedUrl = element.attr('data-watch');
+            if (!embedUrl) continue;
             
-            const serverId = parseInt(serverIdStr, 10);
-            if (serverId >= resourceRegistry.length) continue;
-            
-            const serverNameSpan = element.selectFirst('span.ser');
-            const serverName = serverNameSpan ? serverNameSpan.text.trim() : `Server ${serverId}`;
-            
-            const resData = resourceRegistry[serverId];
-            const confData = configRegistry[serverId];
-            
-            const resCleaned = resData.split('').reverse().join('').replace(/[^A-Za-z0-9\+\/\=]/g, '');
-            
-            const k_b64 = confData.k;
-            const indexVal = parseInt(this.base64Decode(k_b64), 10);
-            const offset = confData.d[indexVal];
-            
-            let decoded = this.base64Decode(resCleaned);
-            if (offset > 0) {
-                decoded = decoded.slice(0, -offset);
-            }
-            
-            if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
-                decoded += "&apiKey=" + apiKey;
-            }
-            
-            let streamwishUrl = decoded;
-            let isStreamWish = false;
-            for (const domain of wishDomains) {
-                if (streamwishUrl.includes(domain)) {
-                    isStreamWish = true;
-                    break;
+            const serverNameA = element.selectFirst('a');
+            let serverName = "Server";
+            if (serverNameA) {
+                const badge = serverNameA.selectFirst('span.quality');
+                let text = serverNameA.text;
+                if (badge) {
+                    text = text.replace(badge.text, "");
                 }
+                serverName = text.trim();
             }
             
-            if (isStreamWish) {
-                streamwishUrl = streamwishUrl.replace("hgcloud.to", "hgplaycdn.com")
-                                             .replace("streamwish.to", "hgplaycdn.com")
-                                             .replace("streamwish.com", "hgplaycdn.com");
+            if (embedUrl.includes("share4max.com")) {
                 try {
-                    const wishVideos = await this.customStreamWishExtractor(streamwishUrl, serverName);
-                    if (wishVideos) videos.push(...wishVideos);
+                    const shareVideos = await this.customShare4maxExtractor(embedUrl, serverName);
+                    if (shareVideos) videos.push(...shareVideos);
                 } catch (e) {
-                    console.log(`StreamWish error: ${e}`);
+                    console.log(`Share4max extractor error: ${e}`);
                 }
-            } else if (decoded.includes("mp4upload.com")) {
+            } else if (embedUrl.includes("larhu.website")) {
                 try {
-                    const mp4Videos = await this.customMp4UploadExtractor(decoded, serverName);
+                    const larhuVideos = await this.customLarhuExtractor(embedUrl, serverName);
+                    if (larhuVideos) videos.push(...larhuVideos);
+                } catch (e) {
+                    console.log(`Larhu extractor error: ${e}`);
+                }
+            } else if (embedUrl.includes("mp4upload.com")) {
+                try {
+                    const mp4Videos = await this.customMp4UploadExtractor(embedUrl, serverName);
                     if (mp4Videos) videos.push(...mp4Videos);
                 } catch (e) {
-                    console.log(`Mp4Upload error: ${e}`);
+                    console.log(`Mp4Upload extractor error: ${e}`);
                 }
-            } else if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
+            } else if (embedUrl.includes("streamwish") || embedUrl.includes("hgcloud.to")) {
                 try {
-                    const yonaHeaders = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Referer": "https://witanime.you/"
-                    };
-                    const yonaRes = await client.get(decoded, yonaHeaders);
-                    if (yonaRes.statusCode === 200) {
-                        const yonaHtml = yonaRes.body;
-                        const playerMatches = yonaHtml.match(/go_to_player\('([^']+)'\)/g);
-                        if (playerMatches) {
-                            for (const matchText of playerMatches) {
-                                const b64Text = matchText.match(/go_to_player\('([^']+)'\)/)[1];
-                                let subUrl = this.base64Decode(b64Text);
-                                
-                                let isSubStreamWish = false;
-                                for (const domain of wishDomains) {
-                                    if (subUrl.includes(domain)) {
-                                        isSubStreamWish = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (isSubStreamWish) {
-                                    subUrl = subUrl.replace("hgcloud.to", "hgplaycdn.com")
-                                                   .replace("streamwish.to", "hgplaycdn.com")
-                                                   .replace("streamwish.com", "hgplaycdn.com");
-                                    const wishVideos = await this.customStreamWishExtractor(subUrl, `${serverName} (Yona)`);
-                                    if (wishVideos) videos.push(...wishVideos);
-                                } else if (subUrl.includes("mp4upload.com")) {
-                                    const mp4Videos = await this.customMp4UploadExtractor(subUrl, `${serverName} (Yona)`);
-                                    if (mp4Videos) videos.push(...mp4Videos);
-                                }
-                            }
-                        }
-                    }
+                    const wishVideos = await this.customStreamWishExtractor(embedUrl, serverName);
+                    if (wishVideos) videos.push(...wishVideos);
                 } catch (e) {
-                    console.log(`Yonaplay sub-extraction error: ${e}`);
+                    console.log(`StreamWish extractor error: ${e}`);
+                }
+            } else if (embedUrl.includes("voe.sx")) {
+                try {
+                    const voeVideos = await this.customVoeExtractor(embedUrl, serverName);
+                    if (voeVideos) videos.push(...voeVideos);
+                } catch (e) {
+                    console.log(`Voe extractor error: ${e}`);
+                }
+            } else if (embedUrl.includes("uqload")) {
+                try {
+                    const uqVideos = await this.customUqloadExtractor(embedUrl, serverName);
+                    if (uqVideos) videos.push(...uqVideos);
+                } catch (e) {
+                    console.log(`Uqload extractor error: ${e}`);
                 }
             }
         }
@@ -603,7 +783,7 @@ class DefaultExtension extends MProvider {
                 state: 0,
                 values: [
                     { type_name: 'SelectOption', name: 'الكل', value: '' },
-                    { type_name: 'SelectOption', name: 'أكشن', value: 'anime-genre/%d8%a3%d9%83%d8%b4%d9%86/' },
+                    { type_name: 'SelectOption', name: 'أكشن', value: 'anime-genre/%d9%85%d8%ba%d8%a7%d9%85%d8%b1%d8%a7%d8%aa/' },
                     { type_name: 'SelectOption', name: 'مغامرات', value: 'anime-genre/%d9%85%d8%ba%d8%a7%d9%85%d8%b1%d8%a7%d8%aa/' },
                     { type_name: 'SelectOption', name: 'كوميدي', value: 'anime-genre/%d9%83%d9%88%d9%85%d9%8a%d8%af%d9%8a/' },
                     { type_name: 'SelectOption', name: 'خيال', value: 'anime-genre/%d8%ae%d9%8a%d8%a7%d9%84/' },
@@ -619,26 +799,13 @@ class DefaultExtension extends MProvider {
             },
             {
                 type_name: 'SelectFilter',
-                name: 'حالة الأنبي',
-                type: 'status',
-                state: 0,
-                values: [
-                    { type_name: 'SelectOption', name: 'الكل', value: '' },
-                    { type_name: 'SelectOption', name: 'مكتمل', value: 'anime-status/%d9%85%d9%83%d8%aa%d9%85%d9%84/' },
-                    { type_name: 'SelectOption', name: 'يعرض الان', value: 'anime-status/%d9%8a%d8%b9%d8%b1%d8%b6-%d8%a7%d9%84%d8%a7%d9%86/' }
-                ]
-            },
-            {
-                type_name: 'SelectFilter',
                 name: 'النوع',
                 type: 'type',
                 state: 0,
                 values: [
                     { type_name: 'SelectOption', name: 'الكل', value: '' },
-                    { type_name: 'SelectOption', name: 'TV', value: 'anime-type/tv/' },
-                    { type_name: 'SelectOption', name: 'Movie', value: 'anime-type/movie/' },
-                    { type_name: 'SelectOption', name: 'OVA', value: 'anime-type/ova/' },
-                    { type_name: 'SelectOption', name: 'ONA', value: 'anime-type/ona/' },
+                    { type_name: 'SelectOption', name: 'TV', value: 'anime-type/tv2/' },
+                    { type_name: 'SelectOption', name: 'Movie', value: 'anime-type/movie-3/' },
                     { type_name: 'SelectOption', name: 'Special', value: 'anime-type/special/' }
                 ]
             }
