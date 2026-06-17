@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://markazriwayat.com",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.2",
+    "version": "0.0.3",
     "pkgPath": "novel/src/ar/markazriwayat.js",
     "notes": ""
 }];
@@ -311,8 +311,11 @@ class DefaultExtension extends MProvider {
         chapters.push({ name: title, url, dateUpload, scanlator: translator });
       }
 
-      const totalPages = parseInt(data?.totalPages || 0, 10) || 0;
-      if (page >= totalPages || items.length < 100) {
+      // The chapters API returns `total` + `has_more`, not `totalPages`.
+      // Rely on `has_more` (with the per_page count as a fallback) so every
+      // chapter is fetched, not just the first page.
+      const hasMoreFlag = data?.has_more === true || data?.has_more === "true";
+      if (!hasMoreFlag || items.length < 100) {
         hasMore = false;
       } else {
         page++;
@@ -337,15 +340,29 @@ class DefaultExtension extends MProvider {
     }
 
     const doc = new Document(res.body);
-    const titleEl = doc.selectFirst("h1.entry-title") || doc.selectFirst("h1");
+    const titleEl =
+      doc.selectFirst("div.reader-chapter") ||
+      doc.selectFirst("h2.wp-manga-chapter-title") ||
+      doc.selectFirst("h1.entry-title") ||
+      doc.selectFirst("h1");
     const title = titleEl ? titleEl.text.trim() : name;
 
+    // The actual chapter text lives in `div.reading-content`. Older themes
+    // used `.epcontent` / `.entry-content`, kept as fallbacks.
     const contentEl =
+      doc.selectFirst("div.reading-content") ||
       doc.selectFirst("div.epcontent") ||
       doc.selectFirst("div.entry-content") ||
       doc.selectFirst("div.entry-content_wrap");
     if (!contentEl) {
       throw new Error("Could not find chapter content in HTML");
+    }
+
+    // Remove hidden anti-scraping watermark spans injected between paragraphs
+    // (e.g. <span class="theam-chobf">...مركز الروايات...</span>).
+    const chobfElements = contentEl.select("span.theam-chobf");
+    for (const el of chobfElements) {
+      el.remove();
     }
 
     return `<h2 style="text-align: center;">${this.cleanTitle(title)}</h2><hr><br>${contentEl.outerHtml}`;
