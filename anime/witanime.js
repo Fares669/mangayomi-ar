@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.6",
+    "version": "0.0.7",
     "pkgPath": "",
-    "notes": "WitAnime JS Extension with custom StreamWish/Mp4Upload/Videa/Dailymotion extractors and latest updates fix"
+    "notes": "Fix StreamWish black screen: prefer absolute hls2/hls3 CDN streams over poisoned relative hls4 path; harden packed-links parsing"
 }];
 
 class DefaultExtension extends MProvider {
@@ -319,13 +319,39 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        const linksMatch = p.match(/var\s+links\s*=\s*(\{.*?\});/);
-        if (!linksMatch) {
+        // The packed "links" object can contain nested braces (e.g. nested setup),
+        // so match from "var links=" and balance braces instead of a naive .*? regex.
+        const linksStart = p.indexOf("var links=");
+        let linksObj = null;
+        if (linksStart !== -1) {
+            const braceStart = p.indexOf("{", linksStart);
+            let depth = 0;
+            let braceEnd = -1;
+            for (let i = braceStart; i < p.length; i++) {
+                if (p[i] === "{") depth++;
+                else if (p[i] === "}") {
+                    depth--;
+                    if (depth === 0) { braceEnd = i; break; }
+                }
+            }
+            if (braceEnd !== -1) {
+                try {
+                    linksObj = JSON.parse(p.substring(braceStart, braceEnd + 1));
+                } catch (e) {
+                    linksObj = null;
+                }
+            }
+        }
+        if (!linksObj) {
             return [];
         }
-        
-        const linksObj = JSON.parse(linksMatch[1]);
-        let masterUrl = linksObj.hls4 || linksObj.hls3 || linksObj.hls2;
+
+        // IMPORTANT: prefer the absolute CDN URLs (hls2/hls3) over hls4.
+        // hls4 is a relative "/stream/..." path served from the player host
+        // that currently returns FAKE anti-scrape segments (TikTok ad CDN URLs),
+        // which causes a black screen. hls2 (.m3u8/.ts) and hls3 (.txt/.woff2)
+        // are the real StreamWish CDN streams.
+        let masterUrl = linksObj.hls2 || linksObj.hls3 || linksObj.hls4;
         if (!masterUrl) {
             return [];
         }
