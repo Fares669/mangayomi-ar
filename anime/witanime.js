@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.9",
+    "version": "0.0.10",
     "pkgPath": "",
-    "notes": "Fix Dailymotion no-sound issue by parsing audio sub-playlists"
+    "notes": "Filter out deleted Mp4Upload streams"
 }];
 
 class DefaultExtension extends MProvider {
@@ -555,7 +555,7 @@ class DefaultExtension extends MProvider {
             "Referer": "https://mp4upload.com/"
         };
         const res = await client.get(url, headers);
-        if (res.statusCode !== 200) {
+        if (res.statusCode !== 200 || res.body.includes("File was deleted") || res.body.includes("File Not Found")) {
             return [];
         }
         

@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://w1.anime4up.rest/wp-content/uploads/2026/04/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.5",
+    "version": "0.0.6",
     "pkgPath": "",
-    "notes": "Fix stream quality names formatting (strip raw iframe HTML)"
+    "notes": "Fix Uqload extractor and add deleted file filter for Mp4Upload"
 }];
 
 class DefaultExtension extends MProvider {
@@ -452,7 +452,7 @@ class DefaultExtension extends MProvider {
             "Referer": "https://mp4upload.com/"
         };
         const res = await client.get(url, headers);
-        if (res.statusCode !== 200) {
+        if (res.statusCode !== 200 || res.body.includes("File was deleted") || res.body.includes("File Not Found")) {
             return [];
         }
         
@@ -730,7 +730,7 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        const srcMatch = p.match(/file\s*:\s*["'](https?:\/\/[&A-Za-z0-9_.\-\/\?#=]+)["']/);
+        const srcMatch = p.match(/file\s*:\s*["']([^"']+)["']/);
         if (!srcMatch) return [];
         
         const fileUrl = srcMatch[1];
