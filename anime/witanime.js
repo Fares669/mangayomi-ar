@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.7",
+    "version": "0.0.8",
     "pkgPath": "",
-    "notes": "Fix StreamWish black screen: prefer absolute hls2/hls3 CDN streams over poisoned relative hls4 path; harden packed-links parsing"
+    "notes": "Fix StreamWish black screen (prefer absolute hls2/hls3 over poisoned hls4) and isolate response timeout (parallelize server extraction with 15s per-server cap)"
 }];
 
 class DefaultExtension extends MProvider {
@@ -717,77 +717,39 @@ class DefaultExtension extends MProvider {
         const apiKey = "23a97133-caf3-4eb4-9466-93d0a4ff8198";
         const wishDomains = ["streamwish", "hgcloud.to", "hgplaycdn.com", "hglamioz.com", "niramirus.com", "playnixes.com", "medixiru.com", "hanerix.com", "audinifer.com", "vibuxer.com", "masukestin.com", "lulustream", "lulu"];
         
-        for (const element of serverElements) {
-            const serverIdStr = element.attr('data-server-id');
-            if (!serverIdStr) continue;
-            
-            const serverId = parseInt(serverIdStr, 10);
-            if (serverId >= resourceRegistry.length) continue;
-            
-            const serverNameSpan = element.selectFirst('span.ser');
-            const serverName = serverNameSpan ? serverNameSpan.text.trim() : `Server ${serverId}`;
-            
-            const resData = resourceRegistry[serverId];
-            const confData = configRegistry[serverId];
-            
-            const resCleaned = resData.split('').reverse().join('').replace(/[^A-Za-z0-9\+\/\=]/g, '');
-            
-            const k_b64 = confData.k;
-            const indexVal = parseInt(this.base64Decode(k_b64), 10);
-            const offset = confData.d[indexVal];
-            
-            let decoded = this.base64Decode(resCleaned);
-            if (offset > 0) {
-                decoded = decoded.slice(0, -offset);
-            }
-            
-            if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
-                decoded += "&apiKey=" + apiKey;
-            }
-            
-            let streamwishUrl = decoded;
-            let isStreamWish = false;
-            for (const domain of wishDomains) {
-                if (streamwishUrl.includes(domain)) {
-                    isStreamWish = true;
-                    break;
+        // Run each server's extraction concurrently so a slow/dead host
+        // (e.g. geoblocked videa.hu DNS hanging ~11s) cannot stall the whole
+        // isolate and trigger an "isolate response timeout". Total wall time
+        // becomes the slowest single server instead of the sum of all of them.
+        const extractFromServer = async (decoded, serverName) => {
+            const results = [];
+            try {
+                let streamwishUrl = decoded;
+                let isStreamWish = false;
+                for (const domain of wishDomains) {
+                    if (streamwishUrl.includes(domain)) {
+                        isStreamWish = true;
+                        break;
+                    }
                 }
-            }
-            
-            if (isStreamWish) {
-                streamwishUrl = streamwishUrl.replace("hgcloud.to", "hgplaycdn.com")
-                                             .replace("streamwish.to", "hgplaycdn.com")
-                                             .replace("streamwish.com", "hgplaycdn.com")
-                                             .replace("lulustream.com", "hgplaycdn.com");
-                try {
+
+                if (isStreamWish) {
+                    streamwishUrl = streamwishUrl.replace("hgcloud.to", "hgplaycdn.com")
+                                                 .replace("streamwish.to", "hgplaycdn.com")
+                                                 .replace("streamwish.com", "hgplaycdn.com")
+                                                 .replace("lulustream.com", "hgplaycdn.com");
                     const wishVideos = await this.customStreamWishExtractor(streamwishUrl, serverName);
-                    if (wishVideos) videos.push(...wishVideos);
-                } catch (e) {
-                    console.log(`StreamWish error: ${e}`);
-                }
-            } else if (decoded.includes("mp4upload.com")) {
-                try {
+                    if (wishVideos) results.push(...wishVideos);
+                } else if (decoded.includes("mp4upload.com")) {
                     const mp4Videos = await this.customMp4UploadExtractor(decoded, serverName);
-                    if (mp4Videos) videos.push(...mp4Videos);
-                } catch (e) {
-                    console.log(`Mp4Upload error: ${e}`);
-                }
-            } else if (decoded.includes("videa.hu") || decoded.includes("videakid.hu")) {
-                try {
+                    if (mp4Videos) results.push(...mp4Videos);
+                } else if (decoded.includes("videa.hu") || decoded.includes("videakid.hu")) {
                     const videaVideos = await this.customVideaExtractor(decoded, serverName);
-                    if (videaVideos) videos.push(...videaVideos);
-                } catch (e) {
-                    console.log(`Videa error: ${e}`);
-                }
-            } else if (decoded.includes("dailymotion.com")) {
-                try {
+                    if (videaVideos) results.push(...videaVideos);
+                } else if (decoded.includes("dailymotion.com")) {
                     const dmVideos = await this.customDailymotionExtractor(decoded, serverName);
-                    if (dmVideos) videos.push(...dmVideos);
-                } catch (e) {
-                    console.log(`Dailymotion error: ${e}`);
-                }
-            } else if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
-                try {
+                    if (dmVideos) results.push(...dmVideos);
+                } else if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
                     const yonaHeaders = {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                         "Referer": "https://witanime.you/"
@@ -800,7 +762,7 @@ class DefaultExtension extends MProvider {
                             for (const matchText of playerMatches) {
                                 const b64Text = matchText.match(/go_to_player\('([^']+)'\)/)[1];
                                 let subUrl = this.base64Decode(b64Text);
-                                
+
                                 let isSubStreamWish = false;
                                 for (const domain of wishDomains) {
                                     if (subUrl.includes(domain)) {
@@ -808,33 +770,79 @@ class DefaultExtension extends MProvider {
                                         break;
                                     }
                                 }
-                                
+
                                 if (isSubStreamWish) {
                                     subUrl = subUrl.replace("hgcloud.to", "hgplaycdn.com")
                                                    .replace("streamwish.to", "hgplaycdn.com")
                                                    .replace("streamwish.com", "hgplaycdn.com")
                                                    .replace("lulustream.com", "hgplaycdn.com");
                                     const wishVideos = await this.customStreamWishExtractor(subUrl, `${serverName} (Yona)`);
-                                    if (wishVideos) videos.push(...wishVideos);
+                                    if (wishVideos) results.push(...wishVideos);
                                 } else if (subUrl.includes("mp4upload.com")) {
                                     const mp4Videos = await this.customMp4UploadExtractor(subUrl, `${serverName} (Yona)`);
-                                    if (mp4Videos) videos.push(...mp4Videos);
+                                    if (mp4Videos) results.push(...mp4Videos);
                                 } else if (subUrl.includes("videa.hu") || subUrl.includes("videakid.hu")) {
                                     const videaVideos = await this.customVideaExtractor(subUrl, `${serverName} (Yona)`);
-                                    if (videaVideos) videos.push(...videaVideos);
+                                    if (videaVideos) results.push(...videaVideos);
                                 } else if (subUrl.includes("dailymotion.com")) {
                                     const dmVideos = await this.customDailymotionExtractor(subUrl, `${serverName} (Yona)`);
-                                    if (dmVideos) videos.push(...dmVideos);
+                                    if (dmVideos) results.push(...dmVideos);
                                 }
                             }
                         }
                     }
-                } catch (e) {
-                    console.log(`Yonaplay sub-extraction error: ${e}`);
                 }
+            } catch (e) {
+                console.log(`Server ${serverName} extraction error: ${e}`);
+            }
+            return results;
+        };
+
+        const serverPromises = [];
+        for (const element of serverElements) {
+            const serverIdStr = element.attr('data-server-id');
+            if (!serverIdStr) continue;
+
+            const serverId = parseInt(serverIdStr, 10);
+            if (serverId >= resourceRegistry.length) continue;
+
+            const serverNameSpan = element.selectFirst('span.ser');
+            const serverName = serverNameSpan ? serverNameSpan.text.trim() : `Server ${serverId}`;
+
+            const resData = resourceRegistry[serverId];
+            const confData = configRegistry[serverId];
+
+            const resCleaned = resData.split('').reverse().join('').replace(/[^A-Za-z0-9\+\/\=]/g, '');
+
+            const k_b64 = confData.k;
+            const indexVal = parseInt(this.base64Decode(k_b64), 10);
+            const offset = confData.d[indexVal];
+
+            let decoded = this.base64Decode(resCleaned);
+            if (offset > 0) {
+                decoded = decoded.slice(0, -offset);
+            }
+
+            if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
+                decoded += "&apiKey=" + apiKey;
+            }
+
+            // Cap each server at 15s so a hanging/dead host (e.g. geoblocked
+            // videa.hu) can never block the whole isolate. Loser servers simply
+            // contribute nothing while the rest resolve.
+            const timeoutGuard = new Promise((resolve) => {
+                setTimeout(() => { console.log(`Server ${serverName} timed out`); resolve([]); }, 15000);
+            });
+            serverPromises.push(Promise.race([extractFromServer(decoded, serverName), timeoutGuard]));
+        }
+
+        const allResults = await Promise.all(serverPromises);
+        for (const serverVideos of allResults) {
+            if (serverVideos && serverVideos.length) {
+                videos.push(...serverVideos);
             }
         }
-        
+
         return videos;
     }
     
