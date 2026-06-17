@@ -3,7 +3,7 @@ const mangayomiSources = [{
     "lang": "ar",
     "baseUrl": "https://w1.anime4up.rest",
     "apiUrl": "",
-    "iconUrl": "https://w1.anime4up.rest/wp-content/uploads/2026/04/cropped-Logo-WITU-192x192.png",
+    "iconUrl": "https://w1.anime4up.rest/wp-content/uploads/2020/05/145DFG5S6D6GH5.png",
     "typeSource": "single",
     "itemType": 1,
     "version": "0.0.6",
