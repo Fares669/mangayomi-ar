@@ -109,34 +109,12 @@ class DefaultExtension extends MProvider {
     return this.parseSearchResults(res.body);
   }
 
-  urlEncode(str) {
-    var result = "";
-    for (var i = 0; i < str.length; i++) {
-      var code = str.charCodeAt(i);
-      if (code >= 0x30 && code <= 0x39 || code >= 0x41 && code <= 0x5A || code >= 0x61 && code <= 0x7A) {
-        result += str[i];
-      } else if (code === 0x20) {
-        result += "+";
-      } else if (code < 0x80) {
-        result += "%" + ("0" + code.toString(16)).slice(-2).toUpperCase();
-      } else if (code < 0x800) {
-        result += "%" + ("0" + (0xC0 | (code >> 6)).toString(16)).slice(-2).toUpperCase();
-        result += "%" + ("0" + (0x80 | (code & 0x3F)).toString(16)).slice(-2).toUpperCase();
-      } else {
-        result += "%" + ("0" + (0xE0 | (code >> 12)).toString(16)).slice(-2).toUpperCase();
-        result += "%" + ("0" + (0x80 | ((code >> 6) & 0x3F)).toString(16)).slice(-2).toUpperCase();
-        result += "%" + ("0" + (0x80 | (code & 0x3F)).toString(16)).slice(-2).toUpperCase();
-      }
-    }
-    return result;
-  }
-
   async search(query, page, filters) {
     if (page == null || page < 1) page = 1;
     var keyword = (query && typeof query === "string") ? query.trim() : "";
     var url;
     if (keyword) {
-      url = this.getBaseUrl() + "/search?q=" + this.urlEncode(keyword) + "&page=" + page;
+      url = this.getBaseUrl() + "/search?q=" + keyword + "&page=" + page;
     } else {
       url = this.getBaseUrl() + "/search?page=" + page;
     }
