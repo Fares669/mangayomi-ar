@@ -110,6 +110,7 @@ class DefaultExtension extends MProvider {
   }
 
   async search(query, page, filters) {
+    console.log("mknov search called: query=" + query + ", page=" + page);
     var keyword = query.trim();
     var url;
     if (keyword) {
@@ -117,9 +118,13 @@ class DefaultExtension extends MProvider {
     } else {
       url = this.getBaseUrl() + "/search?page=" + page;
     }
+    console.log("mknov search URL: " + url);
     var res = await new Client().get(url, this.headers);
+    console.log("mknov search status: " + res.statusCode + ", body length: " + (res.body ? res.body.length : "null"));
     if (res.statusCode !== 200) throw new Error("Failed to fetch search page: " + res.statusCode);
-    return this.parseSearchResults(res.body);
+    var result = this.parseSearchResults(res.body);
+    console.log("mknov search results: " + result.list.length + " items, hasNextPage=" + result.hasNextPage);
+    return result;
   }
 
   toStatus(status) {
