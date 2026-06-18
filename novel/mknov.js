@@ -28,22 +28,20 @@ class DefaultExtension extends MProvider {
   }
 
   extractRscPayload(html) {
-    var parts = html.split('self.__next_f.push([1,"');
-    var combined = "";
-    for (var p = 1; p < parts.length; p++) {
-      var i = 0;
-      while (i < parts[p].length) {
-        if (parts[p][i] === "\\") {
-          i += 2;
-        } else if (parts[p][i] === '"' && parts[p].substring(i, i + 3) === '"])') {
-          combined += this.unescapeRsc(parts[p].substring(0, i));
-          break;
-        } else {
-          i++;
-        }
+    var idx = html.lastIndexOf('self.__next_f.push([1,"');
+    if (idx === -1) return "";
+    var start = idx + 24;
+    var end = start;
+    while (end < html.length) {
+      if (html[end] === "\\") {
+        end += 2;
+      } else if (html[end] === '"' && html.substring(end, end + 3) === '"])') {
+        return this.unescapeRsc(html.substring(start, end));
+      } else {
+        end++;
       }
     }
-    return combined;
+    return "";
   }
 
   extractJsonValue(str, key) {
