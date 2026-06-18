@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://www.mknov.com",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.3",
+    "version": "0.0.4",
     "pkgPath": "novel/src/ar/mknov.js",
     "notes": ""
 }];
@@ -114,7 +114,7 @@ class DefaultExtension extends MProvider {
     var keyword = (query && typeof query === "string") ? query.trim() : "";
     var url;
     if (keyword) {
-      url = this.getBaseUrl() + "/search?q=" + keyword + "&page=" + page;
+      url = this.getBaseUrl() + "/search?q=" + encodeURIComponent(keyword) + "&page=" + page;
     } else {
       url = this.getBaseUrl() + "/search?page=" + page;
     }
