@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://www.mknov.com",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.2",
+    "version": "0.0.3",
     "pkgPath": "novel/src/ar/mknov.js",
     "notes": ""
 }];
@@ -98,33 +98,53 @@ class DefaultExtension extends MProvider {
   }
 
   async getPopular(page) {
+    if (page == null || page < 1) page = 1;
     var res = await new Client().get(this.getBaseUrl() + "/search?sort=views&page=" + page, this.headers);
     if (res.statusCode !== 200) throw new Error("Failed to fetch popular page: " + res.statusCode);
     return this.parseSearchResults(res.body);
   }
 
   async getLatestUpdates(page) {
+    if (page == null || page < 1) page = 1;
     var res = await new Client().get(this.getBaseUrl() + "/search?sort=latest&page=" + page, this.headers);
     if (res.statusCode !== 200) throw new Error("Failed to fetch latest page: " + res.statusCode);
     return this.parseSearchResults(res.body);
   }
 
+  urlEncode(str) {
+    var result = "";
+    for (var i = 0; i < str.length; i++) {
+      var code = str.charCodeAt(i);
+      if (code >= 0x30 && code <= 0x39 || code >= 0x41 && code <= 0x5A || code >= 0x61 && code <= 0x7A) {
+        result += str[i];
+      } else if (code === 0x20) {
+        result += "+";
+      } else if (code < 0x80) {
+        result += "%" + ("0" + code.toString(16)).slice(-2).toUpperCase();
+      } else if (code < 0x800) {
+        result += "%" + ("0" + (0xC0 | (code >> 6)).toString(16)).slice(-2).toUpperCase();
+        result += "%" + ("0" + (0x80 | (code & 0x3F)).toString(16)).slice(-2).toUpperCase();
+      } else {
+        result += "%" + ("0" + (0xE0 | (code >> 12)).toString(16)).slice(-2).toUpperCase();
+        result += "%" + ("0" + (0x80 | ((code >> 6) & 0x3F)).toString(16)).slice(-2).toUpperCase();
+        result += "%" + ("0" + (0x80 | (code & 0x3F)).toString(16)).slice(-2).toUpperCase();
+      }
+    }
+    return result;
+  }
+
   async search(query, page, filters) {
-    console.log("mknov search called: query=" + query + ", page=" + page);
-    var keyword = query.trim();
+    if (page == null || page < 1) page = 1;
+    var keyword = (query && typeof query === "string") ? query.trim() : "";
     var url;
     if (keyword) {
-      url = this.getBaseUrl() + "/search?q=" + encodeURIComponent(keyword) + "&page=" + page;
+      url = this.getBaseUrl() + "/search?q=" + this.urlEncode(keyword) + "&page=" + page;
     } else {
       url = this.getBaseUrl() + "/search?page=" + page;
     }
-    console.log("mknov search URL: " + url);
     var res = await new Client().get(url, this.headers);
-    console.log("mknov search status: " + res.statusCode + ", body length: " + (res.body ? res.body.length : "null"));
     if (res.statusCode !== 200) throw new Error("Failed to fetch search page: " + res.statusCode);
-    var result = this.parseSearchResults(res.body);
-    console.log("mknov search results: " + result.list.length + " items, hasNextPage=" + result.hasNextPage);
-    return result;
+    return this.parseSearchResults(res.body);
   }
 
   toStatus(status) {
