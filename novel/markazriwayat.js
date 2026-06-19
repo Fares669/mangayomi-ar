@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://markazriwayat.com",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.4",
+    "version": "0.0.5",
     "pkgPath": "novel/src/ar/markazriwayat.js",
     "notes": ""
 }];
@@ -55,75 +55,82 @@ class DefaultExtension extends MProvider {
     return null;
   }
 
+  // The site's REST API lives at /wp-json/theam/v1 and no longer requires a
+  // nonce (the THEAM_APP config block that used to expose one was removed
+  // from the homepage). We still try to read it if present, but fall back to
+  // the default endpoint + no-nonce request so detail/chapters keep working.
   async getNonceAndRestUrl() {
-    if (this.nonce && this.restUrl) {
+    if (this.restUrl) {
       return { nonce: this.nonce, restUrl: this.restUrl };
     }
 
+    this.restUrl = `${this.getBaseUrl()}/wp-json/theam/v1`;
+
     const res = await new Client().get(this.getBaseUrl(), this.headers);
-    if (res.statusCode !== 200) {
-      throw new Error(`Failed to load homepage for initialization: ${res.statusCode}`);
-    }
+    if (res.statusCode === 200) {
+      const html = res.body;
+      const idx = html.indexOf("THEAM_APP");
+      if (idx !== -1) {
+        const startIdx = html.indexOf("{", idx);
+        if (startIdx !== -1) {
+          let braceCount = 0;
+          let inString = false;
+          let escape = false;
+          let jsonStr = "";
 
-    const html = res.body;
-    const idx = html.indexOf("THEAM_APP");
-    if (idx === -1) {
-      throw new Error("Could not find THEAM_APP configuration on homepage");
-    }
+          for (let i = startIdx; i < html.length; i++) {
+            const char = html[i];
+            if (escape) {
+              escape = false;
+              continue;
+            }
+            if (char === "\\") {
+              escape = true;
+              continue;
+            }
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            if (!inString) {
+              if (char === "{") {
+                braceCount++;
+              } else if (char === "}") {
+                braceCount--;
+                if (braceCount === 0) {
+                  jsonStr = html.substring(startIdx, i + 1);
+                  break;
+                }
+              }
+            }
+          }
 
-    const startIdx = html.indexOf("{", idx);
-    if (startIdx === -1) {
-      throw new Error("Could not find start of THEAM_APP JSON");
-    }
-
-    let braceCount = 0;
-    let inString = false;
-    let escape = false;
-    let jsonStr = "";
-
-    for (let i = startIdx; i < html.length; i++) {
-      const char = html[i];
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (char === "\\") {
-        escape = true;
-        continue;
-      }
-      if (char === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (!inString) {
-        if (char === "{") {
-          braceCount++;
-        } else if (char === "}") {
-          braceCount--;
-          if (braceCount === 0) {
-            jsonStr = html.substring(startIdx, i + 1);
-            break;
+          if (jsonStr) {
+            try {
+              const theamApp = JSON.parse(jsonStr);
+              this.nonce = theamApp.nonce || "";
+              if (theamApp.restUrl) this.restUrl = theamApp.restUrl;
+            } catch (e) {
+              // ignore parse errors, keep default restUrl + empty nonce
+            }
           }
         }
       }
     }
 
-    if (!jsonStr) {
-      throw new Error("Failed to parse THEAM_APP JSON structure");
-    }
-
-    const theamApp = JSON.parse(jsonStr);
-    this.nonce = theamApp.nonce || "";
-    this.restUrl = theamApp.restUrl || `${this.getBaseUrl()}/wp-json/theam/v1`;
     return { nonce: this.nonce, restUrl: this.restUrl };
   }
 
   async getApiHeaders() {
     const { nonce } = await this.getNonceAndRestUrl();
-    return Object.assign({}, this.headers, {
-      "X-WP-Nonce": nonce,
+    const h = Object.assign({}, this.headers, {
       "Accept": "application/json",
     });
+    // The nonce is no longer required by the API, but send it when available.
+    if (nonce) {
+      h["X-WP-Nonce"] = nonce;
+    }
+    return h;
   }
 
   async getPopular(page) {
