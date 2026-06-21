@@ -73,10 +73,12 @@ class Madara extends MProvider {
           url += "${ll(url)}release=${Uri.encodeComponent(filter.state)}";
         }
       } else if (filter.type == "StatusFilter") {
-        List<String> status = filter.state
-            .where((item) => item.state)
-            .map((item) => item.value.toString())
-            .toList();
+        List<String> status = [];
+        for (var item in filter.state) {
+          if (item.state == true) {
+            status.add(item.value.toString());
+          }
+        }
         if (status.isNotEmpty) {
           url += "${ll(url)}status[]=${status.join('&status[]=')}";
         }
@@ -91,7 +93,12 @@ class Madara extends MProvider {
           url += "${ll(url)}adult=$ctn";
         }
       } else if (filter.type == "GenreListFilter") {
-        final genres = (filter.state as List).where((e) => e.state).toList();
+        List<dynamic> genres = [];
+        for (var e in (filter.state as List)) {
+          if (e.state == true) {
+            genres.add(e);
+          }
+        }
         if (genres.isNotEmpty) {
           for (var genre in genres) {
             url += "${ll(url)}genre[]=${genre.value},";
@@ -236,19 +243,34 @@ class Madara extends MProvider {
       "div.description-summary div.summary__content, div.summary_content div.post-content_item > h5 + div, div.summary_content div.manga-excerpt, .manga-summary, div.c-page__content div.modal-contenido",
     );
     if (descriptionElement.isNotEmpty) {
-      final paragraphs = descriptionElement
-          .expand((e) => e.select("p"))
-          .toList();
+      List<MElement> paragraphs = [];
+      for (var e in descriptionElement) {
+        final pList = e.select("p");
+        if (pList != null) {
+          paragraphs.addAll(pList);
+        }
+      }
 
-      if (paragraphs.isNotEmpty &&
-          paragraphs.any((p) => p.text.trim().isNotEmpty)) {
-        manga.description = paragraphs
-            .map((p) => p.text.replaceAll("<br>", "\n").trim())
-            .join("\n\n");
+      bool hasNotEmpty = false;
+      for (var p in paragraphs) {
+        if (p.text.trim().isNotEmpty) {
+          hasNotEmpty = true;
+          break;
+        }
+      }
+
+      if (paragraphs.isNotEmpty && hasNotEmpty) {
+        List<String> pTexts = [];
+        for (var p in paragraphs) {
+          pTexts.add(p.text.replaceAll("<br>", "\n").trim());
+        }
+        manga.description = pTexts.join("\n\n");
       } else {
-        manga.description = descriptionElement
-            .map((e) => e.text.trim())
-            .join("\n\n");
+        List<String> descTexts = [];
+        for (var e in descriptionElement) {
+          descTexts.add(e.text.trim());
+        }
+        manga.description = descTexts.join("\n\n");
       }
     }
 
@@ -273,9 +295,14 @@ class Madara extends MProvider {
         "";
 
     manga.status = parseStatus(status, statusList);
-    manga.genre =
-        document.select("div.genres-content a")?.map((e) => e.text).toList() ??
-        [];
+    List<String> genres = [];
+    final genreElements = document.select("div.genres-content a");
+    if (genreElements != null) {
+      for (var element in genreElements) {
+        genres.add(element.text);
+      }
+    }
+    manga.genre = genres;
 
     final baseUrl = "${getBaseUrl()}/";
     final headers = {"Referer": baseUrl, "X-Requested-With": "XMLHttpRequest"};
@@ -325,7 +352,16 @@ class Madara extends MProvider {
     final elements = doc.select(
       "div.page-break img, li.blocks-gallery-item img, .reading-content .text-left:not(:has(.blocks-gallery-item)) img",
     );
-    return elements.map((e) => extractImageUrl(e)?.trim()).toList();
+    List<String> images = [];
+    if (elements != null) {
+      for (var e in elements) {
+        var imageUrl = extractImageUrl(e)?.trim();
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          images.add(imageUrl);
+        }
+      }
+    }
+    return images;
   }
 
   List<String> parseProtectorImage(Document doc) {
