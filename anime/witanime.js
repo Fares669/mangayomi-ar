@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.11",
+    "version": "0.0.12",
     "pkgPath": "",
     "notes": "Scrape Mp4Upload stream links from the download section"
 }];
@@ -751,14 +751,52 @@ class DefaultExtension extends MProvider {
         }
         
         const html = res.body;
-        const zgMatch = html.match(/_zG\s*=\s*["']([^"']+)["']/);
-        const zhMatch = html.match(/_zH\s*=\s*["']([^"']+)["']/);
-        if (!zgMatch || !zhMatch) {
+        // The site rotates variable names (was _zG/_zH, now _zX/_zK).
+        // Try known names first, then fall back to extracting them
+        // from the _initializeResources function.
+        let zgVal = null;
+        let zhVal = null;
+        
+        // Try current names first
+        let zgMatch = html.match(/_zX\s*=\s*["']([^"']+)["']/);
+        let zhMatch = html.match(/_zK\s*=\s*["']([^"']+)["']/);
+        if (zgMatch && zhMatch) {
+            zgVal = zgMatch[1];
+            zhVal = zhMatch[1];
+        }
+        
+        // Fallback: try old names
+        if (!zgVal || !zhVal) {
+            zgMatch = html.match(/_zG\s*=\s*["']([^"']+)["']/);
+            zhMatch = html.match(/_zH\s*=\s*["']([^"']+)["']/);
+            if (zgMatch && zhMatch) {
+                zgVal = zgMatch[1];
+                zhVal = zhMatch[1];
+            }
+        }
+        
+        // Last fallback: detect variable names from the init function
+        if (!zgVal || !zhVal) {
+            const resVarMatch = html.match(/resourceRegistry\s*=\s*JSON\.parse\(atob\(([a-zA-Z_$][a-zA-Z0-9_$]*)\)\)/);
+            const cfgVarMatch = html.match(/configRegistry\s*=\s*JSON\.parse\(atob\(([a-zA-Z_$][a-zA-Z0-9_$]*)\)\)/);
+            if (resVarMatch && cfgVarMatch) {
+                const resVarName = resVarMatch[1];
+                const cfgVarName = cfgVarMatch[1];
+                const resRegex = new RegExp(resVarName + '\\s*=\\s*["\']([^"\']+)["\']');
+                const cfgRegex = new RegExp(cfgVarName + '\\s*=\\s*["\']([^"\']+)["\']');
+                const rm = html.match(resRegex);
+                const cm = html.match(cfgRegex);
+                if (rm && cm) {
+                    zgVal = rm[1];
+                    zhVal = cm[1];
+                }
+            }
+        }
+        
+        if (!zgVal || !zhVal) {
             return [];
         }
         
-        const zgVal = zgMatch[1];
-        const zhVal = zhMatch[1];
         const resourceRegistry = JSON.parse(this.base64Decode(zgVal));
         const configRegistry = JSON.parse(this.base64Decode(zhVal));
         
