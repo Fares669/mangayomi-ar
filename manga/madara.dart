@@ -350,14 +350,16 @@ class Madara extends MProvider {
 
   List<String> getImagesFromPage(MDocument doc) {
     final elements = doc.select(
-      "div.page-break img, li.blocks-gallery-item img, .reading-content .text-left:not(:has(.blocks-gallery-item)) img",
+      "div.page-break img, li.blocks-gallery-item img, .reading-content .text-left:not(:has(.blocks-gallery-item)) img, .reading-content img",
     );
     List<String> images = [];
     if (elements != null) {
       for (var e in elements) {
         var imageUrl = extractImageUrl(e)?.trim();
         if (imageUrl != null && imageUrl.isNotEmpty) {
-          images.add(imageUrl);
+          if (!images.contains(imageUrl)) {
+            images.add(imageUrl);
+          }
         }
       }
     }
