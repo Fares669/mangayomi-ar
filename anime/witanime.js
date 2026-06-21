@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.12",
+    "version": "0.0.13",
     "pkgPath": "",
-    "notes": "Scrape Mp4Upload stream links from the download section"
+    "notes": "Scrape Mp4Upload stream links from the download section, and add support for 4shared, videas, and dotplay"
 }];
 
 class DefaultExtension extends MProvider {
@@ -742,6 +742,113 @@ class DefaultExtension extends MProvider {
         
         return videos;
     }
+
+    async customFourSharedExtractor(url, prefix) {
+        const client = new Client();
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://yonaplay.net/"
+        };
+        const res = await client.get(url, headers);
+        if (res.statusCode !== 200) return [];
+        
+        const html = res.body;
+        let videoUrl = "";
+        const doc = new Document(html);
+        const sourceEl = doc.selectFirst('source');
+        if (sourceEl) {
+            videoUrl = sourceEl.attr('src');
+        }
+        if (!videoUrl) {
+            const m = html.match(/<source[^>]*src="([^"]+)"/i);
+            if (m) videoUrl = m[1];
+        }
+        
+        if (!videoUrl) return [];
+        return [{
+            url: videoUrl,
+            quality: `${prefix} 4Shared - Video`,
+            originalUrl: videoUrl,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+        }];
+    }
+
+    async customVideasExtractor(url, prefix) {
+        const client = new Client();
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        };
+        const res = await client.get(url, headers);
+        if (res.statusCode !== 200) return [];
+        
+        const html = res.body;
+        const scriptMatch = html.match(/<script[^>]*id="data-embed"[^>]*>([\s\S]*?)<\/script>/i);
+        if (!scriptMatch) return [];
+        
+        try {
+            const data = JSON.parse(scriptMatch[1]);
+            const videos = [];
+            if (data.medias && data.medias.length > 0) {
+                for (const media of data.medias) {
+                    if (media.src) {
+                        videos.push({
+                            url: media.src,
+                            quality: `${prefix} Videas - Video`,
+                            originalUrl: media.src,
+                            headers: {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                            }
+                        });
+                    }
+                }
+            }
+            return videos;
+        } catch (e) {
+            console.log(`Videas parse error: ${e}`);
+            return [];
+        }
+    }
+
+    async customDotPlayExtractor(url, prefix) {
+        const codeMatch = url.match(/embed\/([a-zA-Z0-9]+)/);
+        if (!codeMatch) return [];
+        const code = codeMatch[1];
+        
+        const client = new Client();
+        const apiUrl = `https://dotplay.net/api.php?code=${code}`;
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+            "Referer": `https://dotplay.net/embed/${code}`
+        };
+        
+        const res = await client.get(apiUrl, headers);
+        if (res.statusCode !== 200) return [];
+        
+        try {
+            const data = JSON.parse(res.body);
+            if (data.success && data.video_url) {
+                const decoded = this.base64Decode(data.video_url);
+                const parts = decoded.split('|');
+                const videoUrl = parts[0];
+                if (videoUrl) {
+                    return [{
+                        url: videoUrl,
+                        quality: `${prefix} DotPlay - Video`,
+                        originalUrl: videoUrl,
+                        headers: {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        }
+                    }];
+                }
+            }
+        } catch (e) {
+            console.log(`DotPlay parse error: ${e}`);
+        }
+        return [];
+    }
     
     async getVideoList(url) {
         const client = new Client();
@@ -838,6 +945,15 @@ class DefaultExtension extends MProvider {
                 } else if (decoded.includes("dailymotion.com")) {
                     const dmVideos = await this.customDailymotionExtractor(decoded, serverName);
                     if (dmVideos) results.push(...dmVideos);
+                } else if (decoded.includes("4shared.com")) {
+                    const fsVideos = await this.customFourSharedExtractor(decoded, serverName);
+                    if (fsVideos) results.push(...fsVideos);
+                } else if (decoded.includes("videas.fr")) {
+                    const vdVideos = await this.customVideasExtractor(decoded, serverName);
+                    if (vdVideos) results.push(...vdVideos);
+                } else if (decoded.includes("dotplay.net")) {
+                    const dpVideos = await this.customDotPlayExtractor(decoded, serverName);
+                    if (dpVideos) results.push(...dpVideos);
                 } else if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
                     const yonaHeaders = {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -876,6 +992,15 @@ class DefaultExtension extends MProvider {
                                 } else if (subUrl.includes("dailymotion.com")) {
                                     const dmVideos = await this.customDailymotionExtractor(subUrl, `${serverName} (Yona)`);
                                     if (dmVideos) results.push(...dmVideos);
+                                } else if (subUrl.includes("4shared.com")) {
+                                    const fsVideos = await this.customFourSharedExtractor(subUrl, `${serverName} (Yona)`);
+                                    if (fsVideos) results.push(...fsVideos);
+                                } else if (subUrl.includes("videas.fr")) {
+                                    const vdVideos = await this.customVideasExtractor(subUrl, `${serverName} (Yona)`);
+                                    if (vdVideos) results.push(...vdVideos);
+                                } else if (subUrl.includes("dotplay.net")) {
+                                    const dpVideos = await this.customDotPlayExtractor(subUrl, `${serverName} (Yona)`);
+                                    if (dpVideos) results.push(...dpVideos);
                                 }
                             }
                         }
