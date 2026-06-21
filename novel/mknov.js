@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://www.mknov.com",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.4",
+    "version": "0.0.5",
     "pkgPath": "novel/src/ar/mknov.js",
     "notes": ""
 }];
@@ -28,20 +28,50 @@ class DefaultExtension extends MProvider {
   }
 
   extractRscPayload(html) {
-    var idx = html.lastIndexOf('self.__next_f.push([1,"');
-    if (idx === -1) return "";
-    var start = idx + 24;
-    var end = start;
-    while (end < html.length) {
-      if (html[end] === "\\") {
-        end += 2;
-      } else if (html[end] === '"' && html.substring(end, end + 3) === '"])') {
-        return this.unescapeRsc(html.substring(start, end));
-      } else {
-        end++;
+    var fullRsc = "";
+    var searchStr1 = 'self.__next_f.push([1,"';
+    var searchStr2 = 'self.__next_f.push([1, "';
+    
+    var idx = 0;
+    while (idx < html.length) {
+      var idx1 = html.indexOf(searchStr1, idx);
+      var idx2 = html.indexOf(searchStr2, idx);
+      var foundIdx = -1;
+      var searchStrLen = 0;
+      
+      if (idx1 !== -1 && idx2 !== -1) {
+        if (idx1 < idx2) {
+          foundIdx = idx1;
+          searchStrLen = searchStr1.length;
+        } else {
+          foundIdx = idx2;
+          searchStrLen = searchStr2.length;
+        }
+      } else if (idx1 !== -1) {
+        foundIdx = idx1;
+        searchStrLen = searchStr1.length;
+      } else if (idx2 !== -1) {
+        foundIdx = idx2;
+        searchStrLen = searchStr2.length;
       }
+      
+      if (foundIdx === -1) break;
+      
+      var start = foundIdx + searchStrLen;
+      var end = start;
+      while (end < html.length) {
+        if (html[end] === "\\") {
+          end += 2;
+        } else if (html[end] === '"' && html.substring(end, end + 3) === '"])') {
+          fullRsc += this.unescapeRsc(html.substring(start, end));
+          break;
+        } else {
+          end++;
+        }
+      }
+      idx = end;
     }
-    return "";
+    return fullRsc;
   }
 
   extractJsonValue(str, key) {
@@ -104,9 +134,24 @@ class DefaultExtension extends MProvider {
 
   async getLatestUpdates(page) {
     if (page == null || page < 1) page = 1;
-    var res = await new Client().get(this.getBaseUrl() + "/search?sort=latest&page=" + page, this.headers);
+    var res = await new Client().get(this.getBaseUrl() + "/api/novels/latest-chapters?page=" + page, this.headers);
     if (res.statusCode !== 200) throw new Error("Failed to fetch latest page: " + res.statusCode);
-    return this.parseSearchResults(res.body);
+    var json = JSON.parse(res.body);
+    var novels = json.data || [];
+    var list = [];
+    for (var i = 0; i < novels.length; i++) {
+      var n = novels[i];
+      var imgUrl = n.image_url || "";
+      if (imgUrl.startsWith("/")) {
+        imgUrl = this.getBaseUrl() + imgUrl;
+      }
+      list.push({
+        name: n.name || "",
+        imageUrl: imgUrl,
+        link: this.getBaseUrl() + "/novel/" + n.id
+      });
+    }
+    return { list: list, hasNextPage: novels.length >= 20 };
   }
 
   async search(query, page, filters) {
