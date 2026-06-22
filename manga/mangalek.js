@@ -8,7 +8,7 @@ const mangayomiSources = [{
     "iconUrl": "https://raw.githubusercontent.com/kodjodevf/mangayomi-extensions/main/dart/manga/multisrc/madara/src/ar/mangalek/icon.png",
     "typeSource": "single",
     "itemType": 0,
-    "version": "0.1.8",
+    "version": "0.1.9",
     "isNsfw": false,
     "pkgPath": "manga/src/ar/mangalek.js"
 }];
@@ -50,6 +50,7 @@ class DefaultExtension extends MProvider {
     url = url || this.getBaseUrl();
     return {
       Referer: `${url}/`,
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     };
   }
 
