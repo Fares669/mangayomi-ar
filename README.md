@@ -6,7 +6,6 @@ This repository contains the available extension catalogues for the Mangayomi ap
 
 Click on one of the buttons below to add the corresponding repository/repositories:
 
-<<<<<<< HEAD
 <a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=mangayomi-ar-extensions%26repo_url=https://github.com/9vsv6/mangayomi-ar-extensions%26manga_url=https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/manga_index.json%26anime_url=https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/anime_index.json%26novel_url=https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/novel_index.json"><img alt="Add all repositories" src="images/add-all-repositories.png" height="35"></a>
 
 <a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=mangayomi-ar-extensions%26repo_url=https://github.com/9vsv6/mangayomi-ar-extensions%26manga_url=https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/manga_index.json"><img alt="Add manga repository" src="images/add-manga-repository.png" height="35"></a>
@@ -14,28 +13,6 @@ Click on one of the buttons below to add the corresponding repository/repositori
 <a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=mangayomi-ar-extensions%26repo_url=https://github.com/9vsv6/mangayomi-ar-extensions%26anime_url=https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/anime_index.json"><img alt="Add anime repository" src="images/add-anime-repository.png" height="35"></a>
 
 <a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=mangayomi-ar-extensions%26repo_url=https://github.com/9vsv6/mangayomi-ar-extensions%26novel_url=https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/novel_index.json"><img alt="Add novel repository" src="images/add-novel-repository.png" height="35"></a>
-=======
-<a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=REPO_NAME%26repo_url=https://github.com/REPO_NAME/REPO_NAME%26manga_url=https://REPO_NAME.github.io/REPO_NAME/index.json%26anime_url=https://REPO_NAME.github.io/REPO_NAME/anime_index.json%26novel_url=https://REPO_NAME.github.io/REPO_NAME/novel_index.json"><img alt="Add all repositories" src="images/add-all-repositories.png" height="35"></a>
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=REPO_NAME%26repo_url=https://github.com/REPO_NAME/REPO_NAME%26manga_url=https://REPO_NAME.github.io/REPO_NAME/index.json"><img alt="Add manga repository" src="images/add-manga-repository.png" height="35"></a>
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=REPO_NAME%26repo_url=https://github.com/REPO_NAME/REPO_NAME%26anime_url=https://REPO_NAME.github.io/REPO_NAME/anime_index.json"><img alt="Add anime repository" src="images/add-anime-repository.png" height="35"></a>
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=mangayomi://add-repo?repo_name=REPO_NAME%26repo_url=https://github.com/REPO_NAME/REPO_NAME%26novel_url=https://REPO_NAME.github.io/REPO_NAME/novel_index.json"><img alt="Add novel repository" src="images/add-novel-repository.png" height="35"></a>
-
-If you installed the app via Live Container, then use the following buttons instead:
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=livecontainer://open-url?url=INSERT_BASE64_URL"><img alt="Add all repositories" src="images/add-all-repositories-livecontainer.png" height="35"></a>
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=livecontainer://open-url?url=INSERT_BASE64_URL"><img alt="Add manga repository" src="images/add-manga-repository-livecontainer.png" height="35"></a>
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=livecontainer://open-url?url=INSERT_BASE64_URL"><img alt="Add anime repository" src="images/add-anime-repository-livecontainer.png" height="35"></a>
-
-<a href="https://intradeus.github.io/http-protocol-redirector?r=livecontainer://open-url?url=INSERT_BASE64_URL"><img alt="Add novel repository" src="images/add-novel-repository-livecontainer.png" height="35"></a>
-
-Click on one of the buttons below to add the corresponding repository/repositories:
-
->>>>>>> f19e49ab875d8c0817108a4b3769ca6b009b8cd9
 
 If you installed the app via Live Container, then use the following buttons instead:
 
