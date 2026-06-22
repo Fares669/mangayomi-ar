@@ -51,12 +51,33 @@ class DefaultExtension extends MProvider {
     };
   }
 
+  utf8Decode(str) {
+    if (!str) return str;
+    try {
+      let result = "";
+      for (let i = 0; i < str.length; i++) {
+        let code = str.charCodeAt(i);
+        if (code <= 255) {
+          let hex = code.toString(16).toUpperCase();
+          if (hex.length < 2) hex = "0" + hex;
+          result += "%" + hex;
+        } else {
+          result += str.charAt(i);
+        }
+      }
+      return decodeURIComponent(result);
+    } catch (e) {
+      return str;
+    }
+  }
+
   async request(url) {
     if (!this.client) {
       this.client = new Client();
     }
     let res = await this.client.get(url, this.getHeaders(url));
-    return new Document(res.body);
+    let body = this.utf8Decode(res.body);
+    return new Document(body);
   }
 
   async getPosts() {
@@ -68,7 +89,8 @@ class DefaultExtension extends MProvider {
       this.client = new Client();
     }
     const res = await this.client.get(`https://api.azoramoon.com/api/posts?page=1&perPage=2000`, this.getHeaders());
-    const data = JSON.parse(res.body);
+    const decodedBody = this.utf8Decode(res.body);
+    const data = JSON.parse(decodedBody);
     this.cachedPosts = data.posts || [];
     this.lastFetchTime = now;
     return this.cachedPosts;
@@ -147,49 +169,118 @@ class DefaultExtension extends MProvider {
   async getDetail(url) {
     const doc = await this.request(url);
     
-    // Title
-    let title = doc.selectFirst("title")?.text?.trim() || "";
-    title = title.replace(/\s+مانهوا\s*-\s*Azora\s+Manga/gi, "")
-                 .replace(/\s*-\s*Azora\s+Manga/gi, "")
-                 .replace(/\s+مانهوا/gi, "");
-                 
-    // Cover Image
-    let imageUrl = doc.selectFirst("meta[property='og:image']")?.attr("content") || "";
-    
-    // Description
-    let description = doc.selectFirst("meta[name='description']")?.attr("content") || "";
-    description = description.replace(/<[^>]+>/g, "").trim();
-    
-    // Author
+    let title = "";
+    let imageUrl = "";
+    let description = "";
     let author = "";
-    const authorEl = doc.selectFirst("a[href*='/author/']");
-    if (authorEl) {
-      author = authorEl.text.trim();
-    }
+    let statusText = "";
+    let genre = [];
+    let postId = "";
     
-    // Status
-    const statusMatch = doc.outerHtml.match(/&quot;seriesStatus&quot;:\[\d+,\s*&quot;([^&]+)&quot;\]/);
-    const statusText = statusMatch ? statusMatch[1] : "";
-    const status = this.toStatus(statusText);
-    
-    // Genres
-    const genre = [];
-    const genreEls = doc.select("a[href*='/genres/'], a[href*='/genre/']");
-    if (genreEls) {
-      for (const e of genreEls) {
-        genre.push(e.text.trim());
+    // Try to extract metadata from Astro serialized props
+    let post = null;
+    const htmlStr = doc.outerHtml;
+    const propsRegex = /props=["'](\{[\s\S]*?\})["']/g;
+    let match;
+    while ((match = propsRegex.exec(htmlStr)) !== null) {
+      const decodedProps = match[1].replace(/&quot;/g, '"')
+                                    .replace(/&amp;/g, '&')
+                                    .replace(/&lt;/g, '<')
+                                    .replace(/&gt;/g, '>')
+                                    .replace(/&#39;/g, "'");
+      if (decodedProps.includes('"postContent"')) {
+        try {
+          const parsed = JSON.parse(decodedProps);
+          const unwrap = (val) => {
+            if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number') {
+              return unwrap(val[1]);
+            }
+            if (val && typeof val === 'object') {
+              if (Array.isArray(val)) {
+                return val.map(unwrap);
+              }
+              const obj = {};
+              for (const k in val) {
+                obj[k] = unwrap(val[k]);
+              }
+              return obj;
+            }
+            return val;
+          };
+          const unwrapped = unwrap(parsed);
+          if (unwrapped && unwrapped.post) {
+            post = unwrapped.post;
+            break;
+          }
+        } catch (e) {}
       }
     }
     
-    // Post ID
-    const postIdMatch = doc.outerHtml.match(/&quot;postId&quot;:\[\d+,\s*(\d+)\]/);
-    const postId = postIdMatch ? postIdMatch[1] : "";
+    // Parse using properties if found, otherwise fall back to HTML selectors
+    if (post) {
+      title = post.postTitle || "";
+      description = (post.postContent || "").replace(/<[^>]+>/g, "").trim();
+      author = post.publishingTeam?.name || "";
+      statusText = post.seriesStatus || "";
+      genre = (post.genres || []).map(g => g.name);
+      postId = post.id ? post.id.toString() : "";
+    } else {
+      // Fallback
+      title = doc.selectFirst("title")?.text?.trim() || "";
+      title = title.replace(/\s+مانهوا\s*-\s*Azora\s+Manga/gi, "")
+                   .replace(/\s*-\s*Azora\s+Manga/gi, "")
+                   .replace(/\s+مانهوا/gi, "");
+                   
+      description = doc.selectFirst("meta[name='description']")?.attr("content") || 
+                    doc.selectFirst("meta[name='twitter:description']")?.attr("content") || 
+                    doc.selectFirst("meta[property='og:description']")?.attr("content") || "";
+      description = description.replace(/<[^>]+>/g, "").trim();
+      
+      const authorEl = doc.selectFirst("a[href*='/author/']");
+      if (authorEl) {
+        author = authorEl.text.trim();
+      }
+      
+      const statusMatch = doc.outerHtml.match(/seriesStatus(?:&quot;|")?:\s*\[\d+,\s*(?:&quot;|")?([^"&\]\s]+)/);
+      statusText = statusMatch ? statusMatch[1] : "";
+      
+      const genreEls = doc.select("a[href*='/genres/'], a[href*='/genre/']");
+      if (genreEls) {
+        for (const e of genreEls) {
+          genre.push(e.text.trim());
+        }
+      }
+      
+      const postIdMatch = doc.outerHtml.match(/postId(?:&quot;|")?:\s*\[\d+,\s*(\d+)\]/);
+      postId = postIdMatch ? postIdMatch[1] : "";
+    }
+    
+    // Cover Image parsing (prioritizing og:image to get correct portrait cover)
+    imageUrl = doc.selectFirst("meta[property='og:image']")?.attr("content") || "";
+    if (!imageUrl) {
+      const imgEl = doc.selectFirst("img[alt*='Cover']");
+      if (imgEl) {
+        imageUrl = imgEl.attr("data-src") || imgEl.attr("data-lazy-src") || imgEl.getSrc || imgEl.attr("src") || "";
+      }
+      if (imageUrl.includes("url=")) {
+        const matched = imageUrl.match(/url=([^&]+)/);
+        if (matched) {
+          imageUrl = decodeURIComponent(matched[1]);
+        }
+      }
+    }
+    if (!imageUrl && post) {
+      imageUrl = post.featuredImage || "";
+    }
+    
+    const status = this.toStatus(statusText);
     
     let chapters = [];
     if (postId) {
       const client = new Client();
       const res = await client.get(`https://api.azoramoon.com/api/chapters?postId=${postId}`, this.getHeaders(url));
-      const data = JSON.parse(res.body);
+      const decodedBody = this.utf8Decode(res.body);
+      const data = JSON.parse(decodedBody);
       const chList = data?.post?.chapters || [];
       
       for (const ch of chList) {
@@ -234,7 +325,7 @@ class DefaultExtension extends MProvider {
 
   async getPageList(url) {
     const doc = await this.request(url);
-    const elements = doc.select("img[alt*='Page']");
+    const elements = doc.select("img[data-reader-page-image], img[alt*='Page']");
     const pages = [];
     const seen = new Set();
     for (const e of elements) {
