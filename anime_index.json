@@ -22,7 +22,7 @@
     "name": "Anime4Up",
     "baseUrl": "https://w1.anime4up.rest",
     "lang": "ar",
-    "iconUrl": "https://w1.anime4up.rest/wp-content/uploads/2026/04/cropped-Logo-WITU-192x192.png",
+    "iconUrl": "https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/icons/anime4up.png",
     "typeSource": "single",
     "itemType": 1,
     "version": "0.0.6",
