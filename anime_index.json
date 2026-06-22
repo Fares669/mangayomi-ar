@@ -7,7 +7,7 @@
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.13",
+    "version": "0.0.14",
     "notes": "Scrape Mp4Upload stream links from the download section, and add support for 4shared, videas, and dotplay",
     "sourceCode": "",
     "sourceCodeUrl": "https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/main/anime/witanime.js",
