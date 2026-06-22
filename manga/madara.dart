@@ -61,15 +61,15 @@ class Madara extends MProvider {
 
     for (var filter in filters) {
       if (filter.type == "AuthorFilter") {
-        if (filter.state.isNotEmpty) {
+        if (filter.state.length > 0) {
           url += "${ll(url)}author=${Uri.encodeComponent(filter.state)}";
         }
       } else if (filter.type == "ArtistFilter") {
-        if (filter.state.isNotEmpty) {
+        if (filter.state.length > 0) {
           url += "${ll(url)}artist=${Uri.encodeComponent(filter.state)}";
         }
       } else if (filter.type == "YearFilter") {
-        if (filter.state.isNotEmpty) {
+        if (filter.state.length > 0) {
           url += "${ll(url)}release=${Uri.encodeComponent(filter.state)}";
         }
       } else if (filter.type == "StatusFilter") {
@@ -79,7 +79,7 @@ class Madara extends MProvider {
             status.add(item.value.toString());
           }
         }
-        if (status.isNotEmpty) {
+        if (status.length > 0) {
           url += "${ll(url)}status[]=${status.join('&status[]=')}";
         }
       } else if (filter.type == "OrderByFilter") {
@@ -89,7 +89,7 @@ class Madara extends MProvider {
         }
       } else if (filter.type == "AdultContentFilter") {
         final ctn = filter.values[filter.state].value;
-        if (ctn.isNotEmpty) {
+        if (ctn.length > 0) {
           url += "${ll(url)}adult=$ctn";
         }
       } else if (filter.type == "GenreListFilter") {
@@ -99,7 +99,7 @@ class Madara extends MProvider {
             genres.add(e);
           }
         }
-        if (genres.isNotEmpty) {
+        if (genres.length > 0) {
           for (var genre in genres) {
             url += "${ll(url)}genre[]=${genre.value},";
           }
@@ -118,7 +118,7 @@ class Madara extends MProvider {
       var ch = element.selectFirst("a");
       if (ch != null) {
         var url = ch.attr("href");
-        if (url != null && url.isNotEmpty) {
+        if (url != null && url.length > 0) {
           url = substringBefore(url, "?style=paged");
           if (url.endsWith("?style=paged")) {
             url = url + "?style=paged";
@@ -126,9 +126,9 @@ class Madara extends MProvider {
           var chapter = MChapter();
           chapter.url = url;
           chapter.name = ch.text;
-          if (source.dateFormat.isNotEmpty) {
+          if (source.dateFormat.length > 0) {
             var chd = element.selectFirst("span.chapter-release-date");
-            if (chd != null && chd.text.isNotEmpty) {
+            if (chd != null && chd.text.length > 0) {
               var dates = parseDates(
                 [chd.text],
                 source.dateFormat,
@@ -242,7 +242,7 @@ class Madara extends MProvider {
     final descriptionElement = document.select(
       "div.description-summary div.summary__content, div.summary_content div.post-content_item > h5 + div, div.summary_content div.manga-excerpt, .manga-summary, div.c-page__content div.modal-contenido",
     );
-    if (descriptionElement.isNotEmpty) {
+    if (descriptionElement.length > 0) {
       List<MElement> paragraphs = [];
       for (var e in descriptionElement) {
         final pList = e.select("p");
@@ -253,13 +253,13 @@ class Madara extends MProvider {
 
       bool hasNotEmpty = false;
       for (var p in paragraphs) {
-        if (p.text.trim().isNotEmpty) {
+        if (p.text.trim().length > 0) {
           hasNotEmpty = true;
           break;
         }
       }
 
-      if (paragraphs.isNotEmpty && hasNotEmpty) {
+      if (paragraphs.length > 0 && hasNotEmpty) {
         List<String> pTexts = [];
         for (var p in paragraphs) {
           pTexts.add(p.text.replaceAll("<br>", "\n").trim());
@@ -283,7 +283,7 @@ class Madara extends MProvider {
             ?.attr("data-id") ??
         "";
     String mangaId = "";
-    if (id.isNotEmpty) {
+    if (id.length > 0) {
       mangaId = id;
     }
     final status =
@@ -323,7 +323,7 @@ class Madara extends MProvider {
 
     MDocument chapDoc = parseHtml(res);
     manga.chapters = getChapters(chapDoc);
-    if (manga.chapters.isEmpty) {
+    if (manga.chapters.length == 0) {
       res = (await client.post(
         Uri.parse("${url}ajax/chapters"),
         headers: headers,
@@ -345,7 +345,7 @@ class Madara extends MProvider {
       images = buildPageUrls(images, document);
     }
 
-    return images.isNotEmpty ? images : parseProtectorImage(document);
+    return images.length > 0 ? images : parseProtectorImage(document);
   }
 
   List<String> getImagesFromPage(MDocument doc) {
@@ -356,7 +356,7 @@ class Madara extends MProvider {
     if (elements != null) {
       for (var e in elements) {
         var imageUrl = extractImageUrl(e)?.trim();
-        if (imageUrl != null && imageUrl.isNotEmpty) {
+        if (imageUrl != null && imageUrl.length > 0) {
           if (!images.contains(imageUrl)) {
             images.add(imageUrl);
           }
@@ -496,7 +496,7 @@ class Madara extends MProvider {
   String getBaseUrl() {
     final baseUrl = getPreferenceValue(source.id, "domain_url")?.trim();
 
-    if (baseUrl == null || baseUrl.isEmpty) {
+    if (baseUrl == null || baseUrl.length == 0) {
       return source.baseUrl;
     }
 
