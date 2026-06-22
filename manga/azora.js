@@ -8,7 +8,7 @@ const mangayomiSources = [{
     "iconUrl": "https://raw.githubusercontent.com/kodjodevf/mangayomi-extensions/main/dart/manga/multisrc/madara/src/ar/azora/icon.png",
     "typeSource": "single",
     "itemType": 0,
-    "version": "0.1.9",
+    "version": "0.2.0",
     "isNsfw": false,
     "pkgPath": "manga/src/ar/azora.js"
 }];
@@ -54,18 +54,16 @@ class DefaultExtension extends MProvider {
   utf8Decode(str) {
     if (!str) return str;
     try {
-      let result = "";
-      for (let i = 0; i < str.length; i++) {
-        let code = str.charCodeAt(i);
-        if (code <= 255) {
-          let hex = code.toString(16).toUpperCase();
-          if (hex.length < 2) hex = "0" + hex;
-          result += "%" + hex;
-        } else {
-          result += str.charAt(i);
-        }
-      }
-      return decodeURIComponent(result);
+      const map = {};
+      let counter = 0;
+      const sanitized = str.replace(/[^\x00-\xFF]/g, (match) => {
+        const key = `__UNI_${counter++}__`;
+        map[key] = match;
+        return key;
+      });
+      const escalated = escape(sanitized);
+      const decoded = decodeURIComponent(escalated);
+      return decoded.replace(/__UNI_\d+__/g, (match) => map[match] || "");
     } catch (e) {
       return str;
     }
@@ -89,8 +87,7 @@ class DefaultExtension extends MProvider {
       this.client = new Client();
     }
     const res = await this.client.get(`https://api.azoramoon.com/api/posts?page=1&perPage=2000`, this.getHeaders());
-    const decodedBody = this.utf8Decode(res.body);
-    const data = JSON.parse(decodedBody);
+    const data = JSON.parse(res.body);
     this.cachedPosts = data.posts || [];
     this.lastFetchTime = now;
     return this.cachedPosts;
@@ -279,8 +276,7 @@ class DefaultExtension extends MProvider {
     if (postId) {
       const client = new Client();
       const res = await client.get(`https://api.azoramoon.com/api/chapters?postId=${postId}`, this.getHeaders(url));
-      const decodedBody = this.utf8Decode(res.body);
-      const data = JSON.parse(decodedBody);
+      const data = JSON.parse(res.body);
       const chList = data?.post?.chapters || [];
       
       for (const ch of chList) {
