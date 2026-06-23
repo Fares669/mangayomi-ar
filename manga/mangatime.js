@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://mangatime.org/images/logo-64.png",
     "typeSource": "single",
     "itemType": 0,
-    "version": "0.0.2",
+    "version": "0.0.3",
     "pkgPath": "",
     "isNsfw": false,
     "notes": "MangaTime JS Extension",
@@ -154,7 +154,7 @@ class DefaultExtension extends MProvider {
         const imageUrl = seriesJson.coverUrl.startsWith("http") ? seriesJson.coverUrl : `${this.getBaseUrl()}${seriesJson.coverUrl}`;
         const description = seriesJson.description || "";
         const author = seriesJson.author || "";
-        const genre = seriesJson.genres || [];
+        const genre = (seriesJson.genres || []).map(g => g.name || g);
         
         let status = 5; // unknown
         if (seriesJson.status) {
@@ -178,7 +178,7 @@ class DefaultExtension extends MProvider {
         const chaptersUrl = `${this.getBaseUrl()}/api/trpc/content.getChapters?batch=1&input=${encodeURIComponent(JSON.stringify(chaptersInput))}`;
         const chaptersRes = await client.get(chaptersUrl, this.getHeaders(chaptersUrl));
         const chaptersData = JSON.parse(chaptersRes.body);
-        const chaptersList = chaptersData[0].result.data.json.items || [];
+        const chaptersList = chaptersData[0].result.data.json.chapters || [];
         
         const chapters = chaptersList.map(chap => {
             const chapUrl = `${this.getBaseUrl()}/manga/${slug}/chapter/${chap.number}`;
@@ -186,8 +186,12 @@ class DefaultExtension extends MProvider {
             if (chap.releasedAt || chap.publishedAt) {
                 dateUpload = new Date(chap.releasedAt || chap.publishedAt).getTime().toString();
             }
+            let chapName = `الفصل ${chap.number}`;
+            if (chap.title && chap.title !== chap.number.toString()) {
+                chapName += ` : ${chap.title}`;
+            }
             return {
-                name: chap.title ? `الفصل ${chap.number} : ${chap.title}` : `الفصل ${chap.number}`,
+                name: chapName,
                 url: chapUrl,
                 dateUpload: dateUpload
             };
