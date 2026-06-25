@@ -323,33 +323,36 @@ class DefaultExtension extends MProvider {
             throw new Error("Could not find chapter content in HTML");
         }
         
-        // Remove unwanted DOM elements (VIP box, donation alert, comments, navigation, disclaimers, etc.)
-        const selectorsToRemove = [
-            ".orw-reader-gap",
-            ".nhv-support-divider",
-            ".nhv-support-box",
-            ".chapter-warning",
-            ".nhv-chapter-disclaimer",
-            ".nhv-inline-comments",
-            "#manga-discussion",
-            ".manga-discussion",
-            ".nhv-reading-topbar",
-            ".nhv-chapter-nav",
-            ".sidebar-tools",
-            ".nhv-reco",
-            ".nhv-report-slot",
-            ".nhv-report-bar"
-        ];
-        for (const selector of selectorsToRemove) {
-            const elements = contentEl.select(selector);
-            for (const el of elements) {
-                el.remove();
-            }
-        }
-        
         let htmlContent = contentEl.outerHtml;
         
-        // Remove protective watermarks (decoy text)
+        // Remove hidden decoy watermarks
+        htmlContent = htmlContent.replace(/<div class="orw-reader-gap"[^>]*>[\s\S]*?<\/p><\/div>/g, "");
+        
+        // Remove PayPal donation alert
+        htmlContent = htmlContent.replace(/<div class="chapter-warning[^"]*"[^>]*>[\s\S]*?<\/div>/g, "");
+        
+        // Remove VIP support box & divider
+        htmlContent = htmlContent.replace(/<section class="nhv-support-box"[^>]*>[\s\S]*?<\/section>/g, "");
+        htmlContent = htmlContent.replace(/<div class="nhv-support-divider"[^>]*>[\s\S]*?<\/div>/g, "");
+        
+        // Remove navigation bars
+        htmlContent = htmlContent.replace(/<div class="nhv-reading-topbar"[^>]*>[\s\S]*?<\/div>\s*<\/div>/g, "");
+        htmlContent = htmlContent.replace(/<div class="nhv-chapter-nav"[^>]*>[\s\S]*?<\/div>/g, "");
+        
+        // Remove comments section
+        htmlContent = htmlContent.replace(/<div class="nhv-inline-comments"[^>]*>[\s\S]*?<\/div>/g, "");
+        htmlContent = htmlContent.replace(/<div id="manga-discussion"[^>]*>[\s\S]*?<\/div>/g, "");
+        htmlContent = htmlContent.replace(/<div class="manga-discussion[^"]*"[^>]*>[\s\S]*?<\/div>/g, "");
+        
+        // Remove disclaimers
+        htmlContent = htmlContent.replace(/<div class="nhv-chapter-disclaimer"[^>]*>[\s\S]*?<\/div>/g, "");
+        
+        // Remove sidebar tools & report boxes
+        htmlContent = htmlContent.replace(/<div class="sidebar-tools"[^>]*>[\s\S]*?<\/div>/g, "");
+        htmlContent = htmlContent.replace(/<div class="nhv-reco"[^>]*>[\s\S]*?<\/div>/g, "");
+        htmlContent = htmlContent.replace(/<div class="nhv-report-[^"]*"[^>]*>[\s\S]*?<\/div>/g, "");
+        
+        // Remove inline protective watermarks (decoy text)
         htmlContent = htmlContent.replace(/هذا (?:ال)?نص (?:تمويهي|حقوق)[\s\S]*?(?:واقرأ براحتك\.?|#[A-Za-z0-9]{8})/g, "");
         
         // Clean up empty paragraphs left behind by the watermark removal
