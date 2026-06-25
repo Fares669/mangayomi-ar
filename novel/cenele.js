@@ -323,7 +323,15 @@ class DefaultExtension extends MProvider {
             throw new Error("Could not find chapter content in HTML");
         }
         
-        return `<h2 style="text-align: center;">${title}</h2><hr><br>${contentEl.outerHtml}`;
+        let htmlContent = contentEl.outerHtml;
+        
+        // Remove protective watermarks (decoy text)
+        htmlContent = htmlContent.replace(/هذا (?:ال)?نص (?:تمويهي|حقوق)[\s\S]*?(?:واقرأ براحتك\.?|#[A-Za-z0-9]{8})/g, "");
+        
+        // Clean up empty paragraphs left behind by the watermark removal
+        htmlContent = htmlContent.replace(/<p>(?:\s|&nbsp;)*<\/p>/g, "");
+        
+        return `<h2 style="text-align: center;">${title}</h2><hr><br>${htmlContent}`;
     }
 
     getFilterList() {
