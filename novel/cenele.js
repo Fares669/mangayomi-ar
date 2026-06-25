@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://cenele.com",
     "typeSource": "single",
     "itemType": 2, // Novel
-    "version": "0.0.2",
+    "version": "0.0.3",
     "pkgPath": "novel/cenele.js",
     "notes": "Novel Space JS Extension"
 }];
@@ -353,7 +353,10 @@ class DefaultExtension extends MProvider {
         htmlContent = htmlContent.replace(/<div class="nhv-report-[^"]*"[^>]*>[\s\S]*?<\/div>/g, "");
         
         // Remove inline protective watermarks (decoy text)
-        htmlContent = htmlContent.replace(/(?:https?:\/\/cenele\.com\/[\s.,-]*)?هذا (?:ال)?نص (?:تمويهي|حقوق)[\s\S]*?(?:واقرأ براحتك\.?|#[A-Za-z0-9]{8})/g, "");
+        htmlContent = htmlContent.replace(/(?:https?:\/\/cenele\.com\/(?:#[A-Za-z0-9]{8})?[\s.,-]*)?هذا (?:ال)?نص (?:تمويهي|حقوق)[\s\S]*?(?:بدون إذن|واقرأ براحتك\.?)(?:\s*\/https?:\/\/cenele\.com\/(?:#[A-Za-z0-9]{8})?)?/g, "");
+        
+        // Remove any standalone watermark URL/hash prefixes
+        htmlContent = htmlContent.replace(/https?:\/\/cenele\.com\/(?:#[A-Za-z0-9]{8})?[\s.,-]*/g, "");
         
         // Clean up empty paragraphs left behind by the watermark removal
         htmlContent = htmlContent.replace(/<p>(?:\s|&nbsp;)*<\/p>/g, "");
