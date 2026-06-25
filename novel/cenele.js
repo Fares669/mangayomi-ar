@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://cenele.com",
     "typeSource": "single",
     "itemType": 2, // Novel
-    "version": "0.0.3",
+    "version": "0.0.4",
     "pkgPath": "novel/cenele.js",
     "notes": "Novel Space JS Extension"
 }];
@@ -325,6 +325,10 @@ class DefaultExtension extends MProvider {
         
         let htmlContent = contentEl.outerHtml;
         
+        // Remove hidden elements (aria-hidden="true" or hidden styles like opacity:0, color:transparent, display:none, etc.)
+        htmlContent = htmlContent.replace(/<(span|div|p|section|a|ins|iframe|script)\b[^>]*?aria-hidden\s*=\s*["']true["'][^>]*?>[\s\S]*?<\/\1>/gi, "");
+        htmlContent = htmlContent.replace(/<(span|div|p|section|a|ins|iframe|script)\b[^>]*?style\s*=\s*["'][^"']*?(?:opacity\s*:\s*0|display\s*:\s*none|visibility\s*:\s*hidden|color\s*:\s*transparent|font-size\s*:\s*0)[^"']*?["'][^>]*?>[\s\S]*?<\/\1>/gi, "");
+        
         // Remove hidden decoy watermarks
         htmlContent = htmlContent.replace(/<div class="orw-reader-gap"[^>]*>[\s\S]*?<\/p><\/div>/g, "");
         
@@ -354,6 +358,13 @@ class DefaultExtension extends MProvider {
         
         // Remove inline protective watermarks (decoy text)
         htmlContent = htmlContent.replace(/(?:https?:\/\/cenele\.com\/(?:#[A-Za-z0-9]{8})?[\s.,-]*)?هذا (?:ال)?نص (?:تمويهي|حقوق)[\s\S]*?(?:بدون إذن|واقرأ براحتك\.?)(?:\s*\/https?:\/\/cenele\.com\/(?:#[A-Za-z0-9]{8})?)?/g, "");
+        
+        // Fallback segment cleaning for fragments
+        htmlContent = htmlContent.replace(/هذا ال?نص (?:تمويهي|حقوق)[^<]*?(?=(?:أو|إذ|إذا|https?:\/\/|$))/g, "");
+        htmlContent = htmlContent.replace(/إذ[أا] ظهر داخل تطبيق آخر فالمصدر مسروق[^<]*?(?=(?:https?:\/\/|$))/g, "");
+        htmlContent = htmlContent.replace(/اقرأ من المصدر[^<]*?(?=(?:https?:\/\/|$))/g, "");
+        htmlContent = htmlContent.replace(/شاي (?:روايات|الروايات|روا) (?:تطبيق )?سارق ويأخذ محتوى بدون إذن[^<]*?(?=(?:https?:\/\/|$))/g, "");
+        htmlContent = htmlContent.replace(/9865dfg\s*#[A-Za-z0-9_*/]+/g, "");
         
         // Remove any standalone watermark URL/hash prefixes
         htmlContent = htmlContent.replace(/https?:\/\/cenele\.com\/(?:#[A-Za-z0-9]{8})?[\s.,-]*/g, "");
