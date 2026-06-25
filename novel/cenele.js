@@ -323,6 +323,30 @@ class DefaultExtension extends MProvider {
             throw new Error("Could not find chapter content in HTML");
         }
         
+        // Remove unwanted DOM elements (VIP box, donation alert, comments, navigation, disclaimers, etc.)
+        const selectorsToRemove = [
+            ".orw-reader-gap",
+            ".nhv-support-divider",
+            ".nhv-support-box",
+            ".chapter-warning",
+            ".nhv-chapter-disclaimer",
+            ".nhv-inline-comments",
+            "#manga-discussion",
+            ".manga-discussion",
+            ".nhv-reading-topbar",
+            ".nhv-chapter-nav",
+            ".sidebar-tools",
+            ".nhv-reco",
+            ".nhv-report-slot",
+            ".nhv-report-bar"
+        ];
+        for (const selector of selectorsToRemove) {
+            const elements = contentEl.select(selector);
+            for (const el of elements) {
+                el.remove();
+            }
+        }
+        
         let htmlContent = contentEl.outerHtml;
         
         // Remove protective watermarks (decoy text)
