@@ -8,7 +8,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://manga-spark.net",
     "typeSource": "single",
     "itemType": 0,
-    "version": "0.1.8",
+    "version": "0.1.9",
     "isNsfw": false,
     "pkgPath": "manga/src/ar/mangaspark.js"
 }];
@@ -189,6 +189,29 @@ class DefaultExtension extends MProvider {
       }
     }
     
+    const recommendations = [];
+    const relEls = doc.select("div.related-reading-wrap");
+    for (const el of relEls) {
+      const aEl = el.selectFirst("h5.widget-title a") || el.selectFirst("div.related-reading-content a");
+      if (aEl) {
+        const name = aEl.text.trim();
+        const link = aEl.getHref;
+        
+        const imgEl = el.selectFirst("img");
+        let imageUrl = "";
+        if (imgEl) {
+          imageUrl = imgEl.attr("data-src") || imgEl.attr("data-lazy-src") || imgEl.attr("srcset")?.split(" ")[0] || imgEl.getSrc || imgEl.attr("src") || "";
+          imageUrl = imageUrl.trim().split(" ")[0];
+        }
+        
+        recommendations.push({
+          name: name,
+          imageUrl: imageUrl,
+          link: link
+        });
+      }
+    }
+    
     return {
       title,
       imageUrl,
@@ -196,7 +219,8 @@ class DefaultExtension extends MProvider {
       author,
       status,
       genre,
-      chapters
+      chapters,
+      recommendations
     };
   }
 
