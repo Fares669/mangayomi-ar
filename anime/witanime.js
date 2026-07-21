@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.22",
+    "version": "0.0.23",
     "pkgPath": "",
     "notes": "Add episode upload dates",
     "preferences": [
