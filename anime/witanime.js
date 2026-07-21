@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.22",
+    "version": "0.0.23",
     "pkgPath": "",
-    "notes": "Move settings preferences to source metadata",
+    "notes": "Add episode upload dates",
     "preferences": [
         {
             "key": "pref_quality",
@@ -247,6 +247,199 @@ class DefaultExtension extends MProvider {
         };
     }
     
+    normalizeEpisodeDate(value, isGmt) {
+        if (value === null || value === undefined || value === "") {
+            return "0";
+        }
+
+        if (typeof value === "number") {
+            const milliseconds = value < 100000000000 ? value * 1000 : value;
+            return String(Math.floor(milliseconds));
+        }
+
+        const rawValue = String(value).trim();
+        if (!rawValue) {
+            return "0";
+        }
+
+        if (/^\d+$/.test(rawValue)) {
+            const numericValue = parseInt(rawValue, 10);
+            const milliseconds = numericValue < 100000000000 ? numericValue * 1000 : numericValue;
+            return String(milliseconds);
+        }
+
+        let dateValue = rawValue;
+        if (isGmt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(dateValue)) {
+            dateValue += "Z";
+        }
+
+        const timestamp = Date.parse(dateValue);
+        return isNaN(timestamp) ? "0" : String(timestamp);
+    }
+
+    getEpisodeSlug(url) {
+        if (!url) {
+            return "";
+        }
+
+        try {
+            const cleanUrl = String(url).split("?")[0].split("#")[0].replace(/\/+$/, "");
+            const slug = cleanUrl.substring(cleanUrl.lastIndexOf("/") + 1);
+            return decodeURIComponent(slug);
+        } catch (e) {
+            const cleanUrl = String(url).split("?")[0].split("#")[0].replace(/\/+$/, "");
+            return cleanUrl.substring(cleanUrl.lastIndexOf("/") + 1);
+        }
+    }
+
+    extractEpisodeUploadDate(html) {
+        if (!html) {
+            return "0";
+        }
+
+        let match = html.match(/"datePublished"\s*:\s*"([^"]+)"/i);
+        if (match) {
+            const dateUpload = this.normalizeEpisodeDate(match[1], false);
+            if (dateUpload !== "0") {
+                return dateUpload;
+            }
+        }
+
+        match = html.match(/property=["']article:published_time["'][^>]*content=["']([^"']+)["']/i);
+        if (!match) {
+            match = html.match(/content=["']([^"']+)["'][^>]*property=["']article:published_time["']/i);
+        }
+        if (match) {
+            return this.normalizeEpisodeDate(match[1], false);
+        }
+
+        return "0";
+    }
+
+    async getEpisodeUploadDates(client, episodes) {
+        const dates = new Array(episodes.length).fill("0");
+        const slugToIndexes = {};
+        const pendingSlugs = [];
+
+        for (let i = 0; i < episodes.length; i++) {
+            const ep = episodes[i];
+
+            const embeddedDate =
+                this.normalizeEpisodeDate(ep.dateUpload, false) !== "0"
+                    ? this.normalizeEpisodeDate(ep.dateUpload, false)
+                    : this.normalizeEpisodeDate(ep.datePublished || ep.date, false);
+
+            if (embeddedDate !== "0") {
+                dates[i] = embeddedDate;
+                continue;
+            }
+
+            const slug = this.getEpisodeSlug(ep.url);
+            if (!slug) {
+                continue;
+            }
+
+            if (!slugToIndexes[slug]) {
+                slugToIndexes[slug] = [];
+                pendingSlugs.push(slug);
+            }
+            slugToIndexes[slug].push(i);
+        }
+
+        // WitAnime exposes episode dates through WordPress REST.
+        // Fetch up to 50 episode records per request instead of opening every page.
+        const restBatchSize = 50;
+        for (let start = 0; start < pendingSlugs.length; start += restBatchSize) {
+            const slugBatch = pendingSlugs.slice(start, start + restBatchSize);
+            const slugQuery = slugBatch.map((slug) => encodeURIComponent(slug)).join(",");
+            const apiUrl =
+                `https://witanime.you/wp-json/wp/v2/episode` +
+                `?slug=${slugQuery}&per_page=100&_fields=slug,link,date,date_gmt`;
+
+            try {
+                const response = await client.get(apiUrl, {
+                    ...this.getHeaders(apiUrl),
+                    "Accept": "application/json"
+                });
+
+                if (response.statusCode !== 200) {
+                    continue;
+                }
+
+                const records = JSON.parse(response.body);
+                if (!Array.isArray(records)) {
+                    continue;
+                }
+
+                for (const record of records) {
+                    const dateUpload =
+                        this.normalizeEpisodeDate(record.date_gmt, true) !== "0"
+                            ? this.normalizeEpisodeDate(record.date_gmt, true)
+                            : this.normalizeEpisodeDate(record.date, false);
+
+                    if (dateUpload === "0") {
+                        continue;
+                    }
+
+                    const possibleSlugs = [
+                        record.slug ? String(record.slug) : "",
+                        this.getEpisodeSlug(record.link)
+                    ];
+
+                    for (const slug of possibleSlugs) {
+                        if (!slug || !slugToIndexes[slug]) {
+                            continue;
+                        }
+
+                        for (const index of slugToIndexes[slug]) {
+                            dates[index] = dateUpload;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log(`Failed to fetch episode dates batch: ${e}`);
+            }
+        }
+
+        // Fallback for any episode not returned by the REST endpoint.
+        const unresolvedIndexes = [];
+        for (let i = 0; i < dates.length; i++) {
+            if (dates[i] === "0") {
+                unresolvedIndexes.push(i);
+            }
+        }
+
+        const fallbackBatchSize = 4;
+        for (let start = 0; start < unresolvedIndexes.length; start += fallbackBatchSize) {
+            const indexBatch = unresolvedIndexes.slice(start, start + fallbackBatchSize);
+            const results = await Promise.all(
+                indexBatch.map(async (index) => {
+                    try {
+                        const episodeUrl = episodes[index].url;
+                        const response = await client.get(episodeUrl, this.getHeaders(episodeUrl));
+                        if (response.statusCode !== 200) {
+                            return { index: index, dateUpload: "0" };
+                        }
+
+                        return {
+                            index: index,
+                            dateUpload: this.extractEpisodeUploadDate(response.body)
+                        };
+                    } catch (e) {
+                        console.log(`Failed to fetch episode date: ${e}`);
+                        return { index: index, dateUpload: "0" };
+                    }
+                })
+            );
+
+            for (const result of results) {
+                dates[result.index] = result.dateUpload;
+            }
+        }
+
+        return dates;
+    }
+
     async getDetail(url) {
         const client = new Client();
         const res = await client.get(url, this.getHeaders(url));
@@ -296,12 +489,15 @@ class DefaultExtension extends MProvider {
                     decryptedStr += String.fromCharCode(encryptedBytes[i] ^ key.charCodeAt(i % key.length));
                 }
                 const episodes = JSON.parse(decryptedStr);
+                const episodeDates = await this.getEpisodeUploadDates(client, episodes);
+
                 for (let i = 0; i < episodes.length; i++) {
                     const ep = episodes[i];
                     chapters.push({
                         name: ep.type + " " + ep.number,
                         url: ep.url,
-                        thumbnailUrl: ep.screenshot
+                        thumbnailUrl: ep.screenshot,
+                        dateUpload: episodeDates[i]
                     });
                 }
             }
