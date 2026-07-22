@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/refs/heads/main/icons/anime4up.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.6",
+    "version": "0.0.7",
     "pkgPath": "",
-    "notes": "Fix Uqload extractor and add deleted file filter for Mp4Upload"
+    "notes": "Fix episode parsing for current and legacy Anime4Up layouts"
 }];
 
 class DefaultExtension extends MProvider {
@@ -21,6 +21,15 @@ class DefaultExtension extends MProvider {
     
     fixUtf8(str) {
         if (!str) return "";
+
+        // Client responses can be either decoded Unicode or a byte-like string.
+        // Keep already-decoded text unchanged so Arabic characters are not lost.
+        for (let j = 0; j < str.length; j++) {
+            if (str.charCodeAt(j) > 255) {
+                return str;
+            }
+        }
+
         let result = "";
         let i = 0;
         while (i < str.length) {
@@ -280,43 +289,115 @@ class DefaultExtension extends MProvider {
         let status = 5;
         
         const chapters = [];
+        const seenEpisodeUrls = {};
         let page = 1;
         let hasNextPage = true;
-        
+
         while (hasNextPage) {
             const pageUrl = page === 1 ? url : `${url.replace(/\/$/, '')}/page/${page}/`;
             const pageRes = await client.get(pageUrl, this.getHeaders(pageUrl));
             if (pageRes.statusCode !== 200) {
                 break;
             }
-            
+
             const pageDoc = new Document(this.fixUtf8(pageRes.body));
-            const cards = pageDoc.select('div#episodesList div.pinned-card');
+
+            // Anime4Up currently serves more than one episode-card layout.
+            let cards = pageDoc.select('div.episodes-card-container');
             if (cards.length === 0) {
-                break;
+                cards = pageDoc.select('#episodesList .themexblock');
             }
-            
+            if (cards.length === 0) {
+                cards = pageDoc.select('div#episodesList div.pinned-card');
+            }
+
+            let addedThisPage = 0;
+
             for (const card of cards) {
-                const img_a = card.selectFirst('a.image');
-                const ep_span = card.selectFirst('a.badge span') || card.selectFirst('a.badge');
-                const ep_name = ep_span ? ep_span.text.trim().replace(/\s+/g, ' ') : "";
-                const ep_url = img_a ? img_a.getHref : "";
-                const thumbnail = img_a ? (img_a.attr('data-src') || img_a.attr('data-image') || img_a.getSrc || "") : "";
-                
+                const epLink =
+                    card.selectFirst('div.episodes-card-title h3 a') ||
+                    card.selectFirst('div.pinned-card > a') ||
+                    card.selectFirst('a[href*="/episode/"]');
+
+                const epUrl = epLink ? (epLink.getHref || epLink.attr('href') || "") : "";
+                const episodeKey = "$" + epUrl;
+                if (!epUrl || seenEpisodeUrls[episodeKey]) {
+                    continue;
+                }
+
+                const nameEl =
+                    card.selectFirst('.badge.light-soft span') ||
+                    card.selectFirst('div.episodes-card-title h3 a') ||
+                    card.selectFirst('div.pinned-card div.info h3') ||
+                    epLink;
+
+                let epName = nameEl ? nameEl.text.trim().replace(/\s+/g, ' ') : "";
+                if (!epName) {
+                    epName = "Episode";
+                }
+
+                const imgEl = card.selectFirst('img');
+                let thumbnail = imgEl
+                    ? (imgEl.attr('data-image') || imgEl.attr('data-original') || imgEl.attr('data-src') || imgEl.getSrc || "")
+                    : "";
+
+                if (!thumbnail && epLink) {
+                    const style = epLink.attr('style') || "";
+                    const styleMatch = style.match(/url\((?:['"])?([^'")]+)(?:['"])?\)/);
+                    if (styleMatch) {
+                        thumbnail = styleMatch[1];
+                    }
+                }
+
+                seenEpisodeUrls[episodeKey] = true;
                 chapters.push({
-                    name: ep_name,
-                    url: ep_url,
+                    name: epName,
+                    url: epUrl,
                     thumbnailUrl: thumbnail
                 });
+                addedThisPage++;
             }
-            
+
+            // Fallback for the classic vnxweb layout and episode-page sidebar.
+            if (addedThisPage === 0) {
+                let episodeLinks = pageDoc.select('div.ehover6 div.episodes-card-title h3 a');
+                if (episodeLinks.length === 0) {
+                    episodeLinks = pageDoc.select('ul.all-episodes-list li a');
+                }
+
+                for (const epLink of episodeLinks) {
+                    const epUrl = epLink.getHref || epLink.attr('href') || "";
+                    const episodeKey = "$" + epUrl;
+                    if (!epUrl || seenEpisodeUrls[episodeKey]) {
+                        continue;
+                    }
+
+                    let epName = epLink.text.trim().replace(/\s+/g, ' ');
+                    if (!epName) {
+                        epName = "Episode";
+                    }
+
+                    seenEpisodeUrls[episodeKey] = true;
+                    chapters.push({
+                        name: epName,
+                        url: epUrl,
+                        thumbnailUrl: ""
+                    });
+                    addedThisPage++;
+                }
+            }
+
+            if (addedThisPage === 0) {
+                break;
+            }
+
             const nextEl = pageDoc.selectFirst('a.next.page-numbers');
             hasNextPage = nextEl !== null;
             page++;
-            
+
             if (page > 50) break;
         }
-        
+
         chapters.reverse();
         
         return {
@@ -865,3 +946,4 @@ class DefaultExtension extends MProvider {
         return [];
     }
 }
+
