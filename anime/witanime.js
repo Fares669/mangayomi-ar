@@ -1,4 +1,4 @@
-// WitAnime extension for Mangayomi - configurable build 0.0.27
+// WitAnime extension for Mangayomi - configurable build 0.0.28
 const mangayomiSources = [{
     "name": "WitAnime",
     "lang": "ar",
@@ -9,7 +9,7 @@ const mangayomiSources = [{
     "itemType": 1,
     "version": "0.0.26",
     "pkgPath": "",
-    "notes": "Detect GoFile from every encrypted download URL and refresh source preferences"
+    "notes": "Generate GoFile website tokens and sync guest accounts"
 }];
 
 class DefaultExtension extends MProvider {
@@ -1362,6 +1362,174 @@ class DefaultExtension extends MProvider {
         return "Video";
     }
 
+    getGofileUserAgent() {
+        // GoFile includes the exact User-Agent in its generated website token,
+        // so the value used for hashing and HTTP requests must stay identical.
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/131.0.0.0 Safari/537.36";
+    }
+
+    getGofileLanguage() {
+        return "en-US";
+    }
+
+    sha256(value) {
+        // Small dependency-free SHA-256 implementation for Mangayomi's JS
+        // runtime. GoFile's website token is a SHA-256 digest.
+        const rotateRight = (word, bits) =>
+            (word >>> bits) | (word << (32 - bits));
+        const bytes = [];
+        const text = String(value || "");
+
+        for (let i = 0; i < text.length; i++) {
+            let code = text.charCodeAt(i);
+            if (code < 0x80) {
+                bytes.push(code);
+            } else if (code < 0x800) {
+                bytes.push(0xc0 | (code >>> 6));
+                bytes.push(0x80 | (code & 0x3f));
+            } else if (
+                code >= 0xd800 && code <= 0xdbff &&
+                i + 1 < text.length
+            ) {
+                const next = text.charCodeAt(i + 1);
+                if (next >= 0xdc00 && next <= 0xdfff) {
+                    code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+                    i++;
+                    bytes.push(0xf0 | (code >>> 18));
+                    bytes.push(0x80 | ((code >>> 12) & 0x3f));
+                    bytes.push(0x80 | ((code >>> 6) & 0x3f));
+                    bytes.push(0x80 | (code & 0x3f));
+                } else {
+                    bytes.push(0xef, 0xbf, 0xbd);
+                }
+            } else if (code >= 0xdc00 && code <= 0xdfff) {
+                bytes.push(0xef, 0xbf, 0xbd);
+            } else {
+                bytes.push(0xe0 | (code >>> 12));
+                bytes.push(0x80 | ((code >>> 6) & 0x3f));
+                bytes.push(0x80 | (code & 0x3f));
+            }
+        }
+
+        const bitLength = bytes.length * 8;
+        bytes.push(0x80);
+        while (bytes.length % 64 !== 56) bytes.push(0);
+
+        const bitLengthHigh = Math.floor(bitLength / 0x100000000);
+        const bitLengthLow = bitLength >>> 0;
+        for (let shift = 24; shift >= 0; shift -= 8) {
+            bytes.push((bitLengthHigh >>> shift) & 0xff);
+        }
+        for (let shift = 24; shift >= 0; shift -= 8) {
+            bytes.push((bitLengthLow >>> shift) & 0xff);
+        }
+
+        const constants = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+            0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+            0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+        ];
+        const hash = [
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+        ];
+        const words = new Array(64);
+
+        for (let offset = 0; offset < bytes.length; offset += 64) {
+            for (let i = 0; i < 16; i++) {
+                const index = offset + i * 4;
+                words[i] = (
+                    (bytes[index] << 24) |
+                    (bytes[index + 1] << 16) |
+                    (bytes[index + 2] << 8) |
+                    bytes[index + 3]
+                ) >>> 0;
+            }
+            for (let i = 16; i < 64; i++) {
+                const s0 = rotateRight(words[i - 15], 7) ^
+                    rotateRight(words[i - 15], 18) ^
+                    (words[i - 15] >>> 3);
+                const s1 = rotateRight(words[i - 2], 17) ^
+                    rotateRight(words[i - 2], 19) ^
+                    (words[i - 2] >>> 10);
+                words[i] = (
+                    words[i - 16] + s0 + words[i - 7] + s1
+                ) >>> 0;
+            }
+
+            let a = hash[0];
+            let b = hash[1];
+            let c = hash[2];
+            let d = hash[3];
+            let e = hash[4];
+            let f = hash[5];
+            let g = hash[6];
+            let h = hash[7];
+
+            for (let i = 0; i < 64; i++) {
+                const sum1 = rotateRight(e, 6) ^
+                    rotateRight(e, 11) ^ rotateRight(e, 25);
+                const choose = (e & f) ^ (~e & g);
+                const temp1 = (h + sum1 + choose + constants[i] + words[i]) >>> 0;
+                const sum0 = rotateRight(a, 2) ^
+                    rotateRight(a, 13) ^ rotateRight(a, 22);
+                const majority = (a & b) ^ (a & c) ^ (b & c);
+                const temp2 = (sum0 + majority) >>> 0;
+
+                h = g;
+                g = f;
+                f = e;
+                e = (d + temp1) >>> 0;
+                d = c;
+                c = b;
+                b = a;
+                a = (temp1 + temp2) >>> 0;
+            }
+
+            hash[0] = (hash[0] + a) >>> 0;
+            hash[1] = (hash[1] + b) >>> 0;
+            hash[2] = (hash[2] + c) >>> 0;
+            hash[3] = (hash[3] + d) >>> 0;
+            hash[4] = (hash[4] + e) >>> 0;
+            hash[5] = (hash[5] + f) >>> 0;
+            hash[6] = (hash[6] + g) >>> 0;
+            hash[7] = (hash[7] + h) >>> 0;
+        }
+
+        return hash.map((word) =>
+            (word >>> 0).toString(16).padStart(8, "0")
+        ).join("");
+    }
+
+    getGofileWebsiteToken(guestToken) {
+        // Mirrors GoFile's current generateWT() logic. The digest rotates every
+        // four hours and is bound to the guest token, User-Agent and language.
+        const timeBucket = Math.floor(Date.now() / 1000 / 14400);
+        const tokenInput = [
+            this.getGofileUserAgent(),
+            this.getGofileLanguage(),
+            String(guestToken || ""),
+            String(timeBucket),
+            "9844d94d963d30"
+        ].join("::");
+        return this.sha256(tokenInput);
+    }
+
     async getGofileGuestToken(client, forceRefresh) {
         if (forceRefresh) {
             this._gofileGuestToken = "";
@@ -1380,8 +1548,10 @@ class DefaultExtension extends MProvider {
                     {
                         "Content-Type": "application/json",
                         "Accept": "application/json",
+                        "X-BL": this.getGofileLanguage(),
                         "Origin": "https://gofile.io",
-                        "Referer": "https://gofile.io/"
+                        "Referer": "https://gofile.io/",
+                        "User-Agent": this.getGofileUserAgent()
                     },
                     {}
                 );
@@ -1393,6 +1563,26 @@ class DefaultExtension extends MProvider {
                 const token = payload && payload.data ? payload.data.token : "";
                 if (token) {
                     this._gofileGuestToken = String(token);
+
+                    // GoFile's web client activates/synchronizes a new guest
+                    // account before requesting folder contents. Do the same,
+                    // but keep the token if this optional sync is rate-limited.
+                    try {
+                        await client.get(
+                            "https://api.gofile.io/accounts/website",
+                            {
+                                "Accept": "application/json",
+                                "Authorization": `Bearer ${this._gofileGuestToken}`,
+                                "X-BL": this.getGofileLanguage(),
+                                "Origin": "https://gofile.io",
+                                "Referer": "https://gofile.io/",
+                                "Cookie": `accountToken=${this._gofileGuestToken}`,
+                                "User-Agent": this.getGofileUserAgent()
+                            }
+                        );
+                    } catch (syncError) {
+                        console.log(`GoFile guest sync error: ${syncError}`);
+                    }
                     return this._gofileGuestToken;
                 }
             } catch (e) {
@@ -1411,61 +1601,24 @@ class DefaultExtension extends MProvider {
         }
     }
 
-    async getGofileWebsiteToken(client, refreshFromSite) {
-        // This is the current public website token used by GoFile's web app.
-        // If it changes, retry by reading config.js before giving up.
-        const fallbackToken = "4fd6sg89d7s6";
-        if (!refreshFromSite) {
-            return this._gofileWebsiteToken || fallbackToken;
-        }
-
-        try {
-            const response = await client.get(
-                "https://gofile.io/dist/js/config.js",
-                {
-                    "Accept": "*/*",
-                    "Referer": "https://gofile.io/",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                }
-            );
-            if (response.statusCode === 200) {
-                const script = String(response.body || "");
-                const patterns = [
-                    /(?:websiteToken|WEBSITE_TOKEN)\s*[:=]\s*["']([A-Za-z0-9_-]{8,})["']/i,
-                    /["']websiteToken["']\s*:\s*["']([A-Za-z0-9_-]{8,})["']/i,
-                    /X-Website-Token["']?\s*[:=]\s*["']([A-Za-z0-9_-]{8,})["']/i
-                ];
-                for (const pattern of patterns) {
-                    const match = script.match(pattern);
-                    if (match) {
-                        this._gofileWebsiteToken = match[1];
-                        return this._gofileWebsiteToken;
-                    }
-                }
-            }
-        } catch (e) {
-            console.log(`GoFile website-token refresh error: ${e}`);
-        }
-        return this._gofileWebsiteToken || fallbackToken;
-    }
-
     async requestGofileContent(client, contentId, forceRefresh) {
         const guestToken = await this.getGofileGuestToken(client, forceRefresh);
         if (!guestToken) return null;
 
-        const websiteToken = await this.getGofileWebsiteToken(client, forceRefresh);
+        const websiteToken = this.getGofileWebsiteToken(guestToken);
         const apiUrl =
             `https://api.gofile.io/contents/${encodeURIComponent(contentId)}` +
-            `?wt=${encodeURIComponent(websiteToken)}` +
-            "&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1";
+            "?contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1";
         try {
             const response = await client.get(apiUrl, {
                 "Accept": "application/json",
                 "Authorization": `Bearer ${guestToken}`,
                 "X-Website-Token": websiteToken,
+                "X-BL": this.getGofileLanguage(),
                 "Origin": "https://gofile.io",
                 "Referer": "https://gofile.io/",
-                "Cookie": `accountToken=${guestToken}`
+                "Cookie": `accountToken=${guestToken}`,
+                "User-Agent": this.getGofileUserAgent()
             });
             if (response.statusCode < 200 || response.statusCode >= 300) {
                 return null;
@@ -1489,7 +1642,7 @@ class DefaultExtension extends MProvider {
         const client = new Client();
         let content = await this.requestGofileContent(client, contentId, false);
         if (!content) {
-            // A guest token or GoFile's public website token may have rotated.
+            // The guest account may have expired or its sync may have failed.
             this._gofileGuestToken = "";
             content = await this.requestGofileContent(client, contentId, true);
         }
@@ -1537,7 +1690,7 @@ class DefaultExtension extends MProvider {
             "Referer": "https://gofile.io/",
             "Origin": "https://gofile.io",
             "Cookie": `accountToken=${content.guestToken}`,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": this.getGofileUserAgent()
         };
 
         for (const file of files) {
