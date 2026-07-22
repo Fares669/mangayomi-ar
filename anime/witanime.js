@@ -646,7 +646,6 @@ class DefaultExtension extends MProvider {
                         chapters.push({
                             name: (type + " " + number).trim(),
                             url: episodeUrl,
-                            thumbnailUrl: this.absoluteUrl(ep.screenshot || "", detailUrl),
                             dateUpload: episodeDates[i] || "0"
                         });
                     }
