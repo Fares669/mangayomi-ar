@@ -1,4 +1,4 @@
-// WitAnime extension for Mangayomi - improved compatibility build 0.0.24
+// WitAnime extension for Mangayomi - configurable build 0.0.25
 const mangayomiSources = [{
     "name": "WitAnime",
     "lang": "ar",
@@ -7,30 +7,109 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.24",
+    "version": "0.0.25",
     "pkgPath": "",
-    "notes": "Fix lists, episode details, dates, and current video servers",
-    "preferences": [
-        {
-            "key": "pref_quality",
-            "name": "Preferred Quality",
-            "type": "List",
-            "list": ["1080p", "720p", "480p", "360p", "Auto"],
-            "value": "1080p"
-        },
-        {
-            "key": "pref_server",
-            "name": "Preferred Server",
-            "type": "List",
-            "list": ["Dailymotion", "StreamWish", "Mp4Upload", "Mp4Upload (Download)", "Yonaplay", "Videa", "Videas", "DotPlay", "Any Server"],
-            "value": "Mp4Upload"
-        }
-    ]
+    "notes": "Add configurable site URL, preferred quality/server, and optional episode dates"
 }];
 
 class DefaultExtension extends MProvider {
+    getPreferenceValue(key, fallback) {
+        try {
+            const value = new SharedPreferences().get(key);
+            return value === null || value === undefined ? fallback : value;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    getBooleanPreference(key, fallback) {
+        const value = this.getPreferenceValue(key, fallback);
+        if (typeof value === "boolean") return value;
+        const normalized = String(value).trim().toLowerCase();
+        if (["true", "1", "yes", "on"].includes(normalized)) return true;
+        if (["false", "0", "no", "off"].includes(normalized)) return false;
+        return fallback;
+    }
+
+    normalizeBaseUrl(value) {
+        const fallback = String(mangayomiSources[0].baseUrl || "https://witanime.you")
+            .replace(/\/+$/, "");
+        let url = String(value || "").trim();
+        if (!url) return fallback;
+        if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+        const origin = url.match(/^(https?:\/\/[^\/?#]+)/i);
+        return origin ? origin[1].replace(/\/+$/, "") : fallback;
+    }
+
     get baseUrl() {
-        return String(mangayomiSources[0].baseUrl || "").replace(/\/+$/, "");
+        return this.normalizeBaseUrl(this.getPreferenceValue(
+            "pref_base_url",
+            mangayomiSources[0].baseUrl
+        ));
+    }
+
+    getSourcePreferences() {
+        return [
+            {
+                key: "pref_base_url",
+                editTextPreference: {
+                    title: "رابط موقع WitAnime",
+                    summary: "غيّر الرابط عند انتقال الموقع إلى نطاق جديد",
+                    value: mangayomiSources[0].baseUrl,
+                    dialogTitle: "رابط WitAnime",
+                    dialogMessage: "مثال: https://witanime.you",
+                    text: mangayomiSources[0].baseUrl
+                }
+            },
+            {
+                key: "pref_quality",
+                listPreference: {
+                    title: "الجودة المفضلة",
+                    summary: "تظهر الجودة المختارة أولًا عند توفرها",
+                    valueIndex: 0,
+                    entries: ["1080p", "720p", "480p", "360p", "Auto"],
+                    entryValues: ["1080p", "720p", "480p", "360p", "Auto"]
+                }
+            },
+            {
+                key: "pref_server",
+                listPreference: {
+                    title: "السيرفر المفضل",
+                    summary: "تظهر روابط السيرفر المختار أولًا",
+                    valueIndex: 2,
+                    entries: [
+                        "Dailymotion",
+                        "StreamWish",
+                        "Mp4Upload",
+                        "Mp4Upload (Download)",
+                        "Yonaplay",
+                        "Videa",
+                        "Videas",
+                        "DotPlay",
+                        "Any Server"
+                    ],
+                    entryValues: [
+                        "Dailymotion",
+                        "StreamWish",
+                        "Mp4Upload",
+                        "Mp4Upload (Download)",
+                        "Yonaplay",
+                        "Videa",
+                        "Videas",
+                        "DotPlay",
+                        "Any Server"
+                    ]
+                }
+            },
+            {
+                key: "pref_fetch_dates",
+                switchPreferenceCompat: {
+                    title: "جلب تواريخ الحلقات",
+                    summary: "قد يبطئ فتح صفحة الأنمي؛ عطّله لعرض الحلقات بسرعة أكبر",
+                    value: false
+                }
+            }
+        ];
     }
 
     getHeaders(url) {
@@ -632,7 +711,13 @@ class DefaultExtension extends MProvider {
 
                     const episodes = JSON.parse(decryptedStr);
                     if (!Array.isArray(episodes)) throw new Error("Invalid episode data");
-                    const episodeDates = await this.getEpisodeUploadDates(client, episodes);
+                    const fetchEpisodeDates = this.getBooleanPreference(
+                        "pref_fetch_dates",
+                        false
+                    );
+                    const episodeDates = fetchEpisodeDates
+                        ? await this.getEpisodeUploadDates(client, episodes)
+                        : null;
 
                     for (let i = 0; i < episodes.length; i++) {
                         const ep = episodes[i] || {};
@@ -643,11 +728,12 @@ class DefaultExtension extends MProvider {
                         const number = ep.number !== null && ep.number !== undefined
                             ? String(ep.number).trim()
                             : "";
-                        chapters.push({
+                        const chapter = {
                             name: (type + " " + number).trim(),
-                            url: episodeUrl,
-                            dateUpload: episodeDates[i] || "0"
-                        });
+                            url: episodeUrl
+                        };
+                        if (episodeDates) chapter.dateUpload = episodeDates[i] || "0";
+                        chapters.push(chapter);
                     }
                 }
             } catch (e) {
@@ -1572,15 +1658,12 @@ class DefaultExtension extends MProvider {
             }
         }
 
-        let preferredQuality = "1080p";
-        let preferredServer = "any";
-        try {
-            const preferences = new SharedPreferences();
-            preferredQuality = preferences.get("pref_quality") || "1080p";
-            preferredServer = preferences.get("pref_server") || "any";
-        } catch (e) {
-            console.log(`Error reading preferences: ${e}`);
-        }
+        const preferredQuality = String(
+            this.getPreferenceValue("pref_quality", "1080p") || "1080p"
+        );
+        const preferredServer = String(
+            this.getPreferenceValue("pref_server", "Mp4Upload") || "Mp4Upload"
+        );
 
         const getQualityRank = (qualityStr) => {
             const q = String(qualityStr || "").toLowerCase();
