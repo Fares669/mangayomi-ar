@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/refs/heads/main/icons/anime4up.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.7",
+    "version": "0.0.8",
     "pkgPath": "",
-    "notes": "Fix episode parsing for current and legacy Anime4Up layouts"
+    "notes": "Fix Mangayomi selectFirst fallbacks and load episodes from the episode sidebar"
 }];
 
 class DefaultExtension extends MProvider {
@@ -17,6 +17,78 @@ class DefaultExtension extends MProvider {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://w1.anime4up.rest/"
         };
+    }
+
+    absoluteUrl(value) {
+        let url = String(value || "").trim().replace(/&amp;/g, "&");
+        if (!url) return "";
+        if (/^(?:https?:|data:|blob:)/i.test(url)) return url;
+        if (url.startsWith("//")) return "https:" + url;
+        if (url.startsWith("/")) return "https://w1.anime4up.rest" + url;
+        return "https://w1.anime4up.rest/" + url.replace(/^\.\//, "");
+    }
+
+    elementText(element) {
+        if (!element) return "";
+        return String(element.text || "").trim().replace(/\s+/g, " ");
+    }
+
+    elementHref(element) {
+        if (!element) return "";
+        return this.absoluteUrl(element.getHref || element.attr("href") || "");
+    }
+
+    elementImage(element) {
+        if (!element) return "";
+        const value = element.attr("data-image") ||
+            element.attr("data-original") ||
+            element.attr("data-src") ||
+            element.getSrc ||
+            element.attr("src") ||
+            "";
+        return this.absoluteUrl(value);
+    }
+
+    firstWithHref(root, selectors) {
+        for (const selector of selectors) {
+            const element = root.selectFirst(selector);
+            const url = this.elementHref(element);
+            if (url) return { element: element, url: url };
+        }
+        return { element: null, url: "" };
+    }
+
+    firstText(root, selectors) {
+        for (const selector of selectors) {
+            const text = this.elementText(root.selectFirst(selector));
+            if (text) return text;
+        }
+        return "";
+    }
+
+    firstImage(root, selectors) {
+        for (const selector of selectors) {
+            const image = this.elementImage(root.selectFirst(selector));
+            if (image) return image;
+        }
+        return "";
+    }
+
+    isCloudflareChallenge(body) {
+        const html = String(body || "").toLowerCase();
+        return html.includes("<title>just a moment") ||
+            html.includes("cf-chl-") ||
+            html.includes("challenge-platform") ||
+            html.includes('id="challenge-running"');
+    }
+
+    assertResponse(response, label) {
+        if (response.statusCode !== 200) {
+            throw new Error(`${label}: HTTP ${response.statusCode}`);
+        }
+        if (this.isCloudflareChallenge(response.body)) {
+            throw new Error(`${label}: Cloudflare challenge. Open Anime4Up in Mangayomi WebView once, complete the challenge, then retry.`);
+        }
     }
     
     fixUtf8(str) {
@@ -111,22 +183,21 @@ class DefaultExtension extends MProvider {
         const url = `https://w1.anime4up.rest/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
             
         const res = await client.get(url, this.getHeaders(url));
-        if (res.statusCode !== 200) {
-            throw new Error(`Failed to fetch popular list: ${res.statusCode}`);
-        }
+        this.assertResponse(res, "Failed to fetch popular list");
         
         const doc = new Document(this.fixUtf8(res.body));
         const cards = doc.select('div.anime-card-container');
         const list = [];
         for (const card of cards) {
-            const titleEl = card.selectFirst('div.anime-card-title h3 a');
-            const overlayEl = card.selectFirst('div.anime-card-poster a.overlay');
-            const imgEl = card.selectFirst('div.anime-card-poster img');
-            
-            if (titleEl && imgEl) {
-                const name = titleEl.text.trim();
-                const link = titleEl.getHref || (overlayEl ? overlayEl.getHref : "");
-                const imageUrl = imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "";
+            const name = this.firstText(card, ['div.anime-card-title h3 a', 'h3 a']);
+            const link = this.firstWithHref(card, [
+                'div.anime-card-title h3 a',
+                'div.anime-card-poster a.overlay',
+                'a'
+            ]).url;
+            const imageUrl = this.firstImage(card, ['div.anime-card-poster img', 'img']);
+
+            if (name && link) {
                 list.push({
                     name: name,
                     link: link,
@@ -135,8 +206,10 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        const nextEl = doc.selectFirst('a.next.page-numbers');
-        const hasNextPage = nextEl !== null;
+        const hasNextPage = !!this.firstWithHref(doc, [
+            'a.next.page-numbers',
+            'ul.pagination a.next'
+        ]).url;
         
         return {
             list: list,
@@ -149,25 +222,31 @@ class DefaultExtension extends MProvider {
         const url = `https://w1.anime4up.rest/episode/page/${page}/`;
             
         const res = await client.get(url, this.getHeaders(url));
-        if (res.statusCode !== 200) {
-            throw new Error(`Failed to fetch latest list: ${res.statusCode}`);
-        }
+        this.assertResponse(res, "Failed to fetch latest list");
         
         const doc = new Document(this.fixUtf8(res.body));
         const cards = doc.select('div.anime-card-container');
         const list = [];
         for (const card of cards) {
-            const titleEl = card.selectFirst('div.anime-card-details div.anime-card-title h3 a');
-            const imgEl = card.selectFirst('div.anime-card-poster img');
-            const epEl = card.selectFirst('div.anime-card-poster div.ep_num a') || card.selectFirst('div.episodes-card-title h3 a');
-            
-            if (titleEl && imgEl) {
-                let name = titleEl.text.trim();
-                if (epEl) {
-                    name = name + " - " + epEl.text.trim().replace(/\s+/g, ' ');
-                }
-                const link = titleEl.getHref || "";
-                const imageUrl = imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "";
+            let name = this.firstText(card, [
+                'div.anime-card-details div.anime-card-title h3 a',
+                'div.anime-card-title h3 a',
+                'h3 a'
+            ]);
+            const episodeText = this.firstText(card, [
+                'div.anime-card-poster div.ep_num a',
+                'div.episodes-card-title h3 a'
+            ]);
+            const link = this.firstWithHref(card, [
+                'div.anime-card-details div.anime-card-title h3 a',
+                'div.anime-card-title h3 a',
+                'a[href*="/anime/"]',
+                'a[href*="/episode/"]'
+            ]).url;
+            const imageUrl = this.firstImage(card, ['div.anime-card-poster img', 'img']);
+
+            if (name && link) {
+                if (episodeText) name = name + " - " + episodeText;
                 list.push({
                     name: name,
                     link: link,
@@ -176,8 +255,10 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        const nextEl = doc.selectFirst('a.next.page-numbers');
-        const hasNextPage = nextEl !== null;
+        const hasNextPage = !!this.firstWithHref(doc, [
+            'a.next.page-numbers',
+            'ul.pagination a.next'
+        ]).url;
         
         return {
             list: list,
@@ -224,14 +305,15 @@ class DefaultExtension extends MProvider {
         const cards = doc.select('div.anime-card-container');
         const list = [];
         for (const card of cards) {
-            const titleEl = card.selectFirst('div.anime-card-title h3 a');
-            const overlayEl = card.selectFirst('div.anime-card-poster a.overlay');
-            const imgEl = card.selectFirst('div.anime-card-poster img');
-            
-            if (titleEl && imgEl) {
-                const name = titleEl.text.trim();
-                const link = titleEl.getHref || (overlayEl ? overlayEl.getHref : "");
-                const imageUrl = imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "";
+            const name = this.firstText(card, ['div.anime-card-title h3 a', 'h3 a']);
+            const link = this.firstWithHref(card, [
+                'div.anime-card-title h3 a',
+                'div.anime-card-poster a.overlay',
+                'a'
+            ]).url;
+            const imageUrl = this.firstImage(card, ['div.anime-card-poster img', 'img']);
+
+            if (name && link) {
                 list.push({
                     name: name,
                     link: link,
@@ -240,8 +322,10 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        const nextEl = doc.selectFirst('a.next.page-numbers');
-        const hasNextPage = nextEl !== null;
+        const hasNextPage = !!this.firstWithHref(doc, [
+            'a.next.page-numbers',
+            'ul.pagination a.next'
+        ]).url;
         
         return {
             list: list,
@@ -249,157 +333,247 @@ class DefaultExtension extends MProvider {
         };
     }
     
-    async getDetail(url) {
-        const client = new Client();
-        
-        // If it's an episode page, resolve parent anime details URL first
-        if (url.includes("/episode/")) {
-            const tempRes = await client.get(url, this.getHeaders(url));
-            if (tempRes.statusCode === 200) {
-                const tempDoc = new Document(this.fixUtf8(tempRes.body));
-                const parentEl = tempDoc.selectFirst('a[href*="/anime/"]');
-                if (parentEl) {
-                    url = parentEl.getHref;
-                }
+    addEpisode(chapters, seenEpisodeUrls, episodeUrl, episodeName, thumbnailUrl) {
+        const url = this.absoluteUrl(episodeUrl);
+        if (!url) return 0;
+
+        const key = "$" + url.split("#")[0];
+        if (seenEpisodeUrls[key]) return 0;
+
+        seenEpisodeUrls[key] = true;
+        chapters.push({
+            name: String(episodeName || "Episode").trim().replace(/\s+/g, " ") || "Episode",
+            url: url,
+            thumbnailUrl: this.absoluteUrl(thumbnailUrl)
+        });
+        return 1;
+    }
+
+    collectSidebarEpisodes(doc, chapters, seenEpisodeUrls, fallbackThumbnail) {
+        let added = 0;
+        const selectors = [
+            "ul.all-episodes-list li a",
+            "#ULEpisodesList li a"
+        ];
+
+        for (const selector of selectors) {
+            const links = doc.select(selector);
+            for (const link of links) {
+                added += this.addEpisode(
+                    chapters,
+                    seenEpisodeUrls,
+                    this.elementHref(link),
+                    this.elementText(link),
+                    fallbackThumbnail
+                );
             }
         }
-        
-        const res = await client.get(url, this.getHeaders(url));
-        if (res.statusCode !== 200) {
-            throw new Error(`Failed to fetch detail: ${res.statusCode}`);
+        return added;
+    }
+
+    collectEpisodeCards(doc, chapters, seenEpisodeUrls, fallbackThumbnail) {
+        let added = 0;
+        const cardSelectors = [
+            "#episodesList .themexblock",
+            "div.episodes-card-container",
+            "div#episodesList div.pinned-card",
+            "div.ehover6"
+        ];
+
+        for (const cardSelector of cardSelectors) {
+            const cards = doc.select(cardSelector);
+            for (const card of cards) {
+                // Mangayomi's selectFirst() always returns an Element object,
+                // including for a missing match. Validate href/text values instead
+                // of relying on `||` or object truthiness.
+                const link = this.firstWithHref(card, [
+                    'a[href*="/episode/"]',
+                    "div.episodes-card-title h3 a",
+                    "div.pinned-card > a",
+                    "a"
+                ]);
+                if (!link.url) continue;
+
+                const episodeName = this.firstText(card, [
+                    ".badge.light-soft span",
+                    "div.episodes-card-title h3 a",
+                    "div.pinned-card div.info h3",
+                    'a[href*="/episode/"]'
+                ]) || this.elementText(link.element);
+
+                let thumbnail = this.firstImage(card, ["img"]);
+                if (!thumbnail && link.element) {
+                    const style = link.element.attr("style") || "";
+                    const match = style.match(/url\((?:['"])?([^'")]+)(?:['"])?\)/);
+                    if (match) thumbnail = this.absoluteUrl(match[1]);
+                }
+
+                added += this.addEpisode(
+                    chapters,
+                    seenEpisodeUrls,
+                    link.url,
+                    episodeName,
+                    thumbnail || fallbackThumbnail
+                );
+            }
         }
-        
+
+        // Some Anime4Up templates expose only direct links, without a card wrapper.
+        const directSelectors = [
+            "div.ehover6 > div.episodes-card-title > h3 > a",
+            '#episodesList a[href*="/episode/"]',
+            'div.episodes-card-container a[href*="/episode/"]'
+        ];
+        for (const selector of directSelectors) {
+            const links = doc.select(selector);
+            for (const link of links) {
+                added += this.addEpisode(
+                    chapters,
+                    seenEpisodeUrls,
+                    this.elementHref(link),
+                    this.elementText(link),
+                    fallbackThumbnail
+                );
+            }
+        }
+
+        return added;
+    }
+
+    async getDetail(inputUrl) {
+        const client = new Client();
+        let url = this.absoluteUrl(inputUrl);
+        let initialResponse = null;
+
+        // Latest-update entries can point to an episode. Resolve the exact parent
+        // anime link used by the current Anime4Up episode template.
+        if (url.includes("/episode/")) {
+            initialResponse = await client.get(url, this.getHeaders(url));
+            this.assertResponse(initialResponse, "Failed to fetch episode details");
+            const episodeDoc = new Document(this.fixUtf8(initialResponse.body));
+            const parent = this.firstWithHref(episodeDoc, [
+                ".anime-page-link a",
+                '.anime-breadcrumb a[href*="/anime/"]'
+            ]);
+            if (parent.url) url = parent.url;
+        }
+
+        let res = initialResponse;
+        if (!res || !res.request || !res.request.url || res.request.url !== url) {
+            res = await client.get(url, this.getHeaders(url));
+            this.assertResponse(res, "Failed to fetch anime details");
+        }
+
         const doc = new Document(this.fixUtf8(res.body));
-        
-        const titleEl = doc.selectFirst('h1.anime-details-title');
-        const name = titleEl ? titleEl.text.trim() : "";
-        
-        const imgEl = doc.selectFirst('img.thumbnail.img-responsive') || doc.selectFirst('img.thumbnail');
-        const imageUrl = imgEl ? (imgEl.attr('data-src') || imgEl.attr('data-image') || imgEl.getSrc || "") : "";
-        
-        const descEl = doc.selectFirst('p.anime-story');
-        const description = descEl ? descEl.text.trim() : "";
-        
+        const name = this.firstText(doc, [
+            "h1.anime-details-title",
+            "h1.entry-title"
+        ]);
+        const imageUrl = this.firstImage(doc, [
+            ".anime-thumbnail img",
+            "img.thumbnail.img-responsive",
+            "img.thumbnail"
+        ]);
+        const description = this.firstText(doc, ["p.anime-story"]);
+
         const genres = [];
         const genreElements = doc.select('a[href*="/anime-genre/"]');
         for (const element of genreElements) {
-            genres.push(element.text.trim());
+            const genre = this.elementText(element);
+            if (genre) genres.push(genre);
         }
-        
+
         let status = 5;
-        
+        const statusText = this.firstText(doc, [
+            'a[href*="/anime-status/"]',
+            "div.anime-info:contains(حالة الأنمي)"
+        ]);
+        if (statusText.includes("يعرض الان") || statusText.includes("يعرض الآن")) {
+            status = 0;
+        } else if (statusText.includes("مكتمل")) {
+            status = 1;
+        }
+
         const chapters = [];
         const seenEpisodeUrls = {};
-        let page = 1;
-        let hasNextPage = true;
 
-        while (hasNextPage) {
-            const pageUrl = page === 1 ? url : `${url.replace(/\/$/, '')}/page/${page}/`;
-            const pageRes = await client.get(pageUrl, this.getHeaders(pageUrl));
-            if (pageRes.statusCode !== 200) {
-                break;
-            }
+        // Current Anime4Up episode pages contain the complete series list in
+        // ul.all-episodes-list. Fetching the first episode is more reliable than
+        // guessing paginated anime-page URLs.
+        let sidebarCount = this.collectSidebarEpisodes(
+            doc,
+            chapters,
+            seenEpisodeUrls,
+            imageUrl
+        );
 
-            const pageDoc = new Document(this.fixUtf8(pageRes.body));
+        if (sidebarCount === 0) {
+            const firstEpisode = this.firstWithHref(doc, [
+                ".anime-external-links a.anime-first-ep",
+                '#episodesList .themexblock a[href*="/episode/"]',
+                '#episodesList a[href*="/episode/"]',
+                'div.episodes-card-container a[href*="/episode/"]',
+                "div.ehover6 div.episodes-card-title h3 a"
+            ]);
 
-            // Anime4Up currently serves more than one episode-card layout.
-            let cards = pageDoc.select('div.episodes-card-container');
-            if (cards.length === 0) {
-                cards = pageDoc.select('#episodesList .themexblock');
-            }
-            if (cards.length === 0) {
-                cards = pageDoc.select('div#episodesList div.pinned-card');
-            }
-
-            let addedThisPage = 0;
-
-            for (const card of cards) {
-                const epLink =
-                    card.selectFirst('div.episodes-card-title h3 a') ||
-                    card.selectFirst('div.pinned-card > a') ||
-                    card.selectFirst('a[href*="/episode/"]');
-
-                const epUrl = epLink ? (epLink.getHref || epLink.attr('href') || "") : "";
-                const episodeKey = "$" + epUrl;
-                if (!epUrl || seenEpisodeUrls[episodeKey]) {
-                    continue;
+            if (firstEpisode.url) {
+                const episodeResponse = await client.get(
+                    firstEpisode.url,
+                    this.getHeaders(firstEpisode.url)
+                );
+                if (this.isCloudflareChallenge(episodeResponse.body)) {
+                    this.assertResponse(episodeResponse, "Failed to fetch episode list");
                 }
-
-                const nameEl =
-                    card.selectFirst('.badge.light-soft span') ||
-                    card.selectFirst('div.episodes-card-title h3 a') ||
-                    card.selectFirst('div.pinned-card div.info h3') ||
-                    epLink;
-
-                let epName = nameEl ? nameEl.text.trim().replace(/\s+/g, ' ') : "";
-                if (!epName) {
-                    epName = "Episode";
-                }
-
-                const imgEl = card.selectFirst('img');
-                let thumbnail = imgEl
-                    ? (imgEl.attr('data-image') || imgEl.attr('data-original') || imgEl.attr('data-src') || imgEl.getSrc || "")
-                    : "";
-
-                if (!thumbnail && epLink) {
-                    const style = epLink.attr('style') || "";
-                    const styleMatch = style.match(/url\((?:['"])?([^'")]+)(?:['"])?\)/);
-                    if (styleMatch) {
-                        thumbnail = styleMatch[1];
-                    }
-                }
-
-                seenEpisodeUrls[episodeKey] = true;
-                chapters.push({
-                    name: epName,
-                    url: epUrl,
-                    thumbnailUrl: thumbnail
-                });
-                addedThisPage++;
-            }
-
-            // Fallback for the classic vnxweb layout and episode-page sidebar.
-            if (addedThisPage === 0) {
-                let episodeLinks = pageDoc.select('div.ehover6 div.episodes-card-title h3 a');
-                if (episodeLinks.length === 0) {
-                    episodeLinks = pageDoc.select('ul.all-episodes-list li a');
-                }
-
-                for (const epLink of episodeLinks) {
-                    const epUrl = epLink.getHref || epLink.attr('href') || "";
-                    const episodeKey = "$" + epUrl;
-                    if (!epUrl || seenEpisodeUrls[episodeKey]) {
-                        continue;
-                    }
-
-                    let epName = epLink.text.trim().replace(/\s+/g, ' ');
-                    if (!epName) {
-                        epName = "Episode";
-                    }
-
-                    seenEpisodeUrls[episodeKey] = true;
-                    chapters.push({
-                        name: epName,
-                        url: epUrl,
-                        thumbnailUrl: ""
-                    });
-                    addedThisPage++;
+                if (episodeResponse.statusCode === 200) {
+                    const episodeDoc = new Document(this.fixUtf8(episodeResponse.body));
+                    sidebarCount = this.collectSidebarEpisodes(
+                        episodeDoc,
+                        chapters,
+                        seenEpisodeUrls,
+                        imageUrl
+                    );
                 }
             }
+        }
 
-            if (addedThisPage === 0) {
-                break;
+        // Legacy templates keep episodes on the anime page. Follow the real next
+        // link instead of assuming /page/N/, and stop when the link is empty.
+        if (sidebarCount === 0) {
+            let pageDoc = doc;
+            let pageUrl = url;
+            const seenPageUrls = {};
+
+            for (let page = 1; page <= 50; page++) {
+                this.collectEpisodeCards(
+                    pageDoc,
+                    chapters,
+                    seenEpisodeUrls,
+                    imageUrl
+                );
+
+                const nextPage = this.firstWithHref(pageDoc, [
+                    "a.next.page-numbers",
+                    "ul.pagination a.next"
+                ]);
+                if (!nextPage.url || nextPage.url === pageUrl || seenPageUrls[nextPage.url]) {
+                    break;
+                }
+
+                seenPageUrls[nextPage.url] = true;
+                pageUrl = nextPage.url;
+                const pageResponse = await client.get(pageUrl, this.getHeaders(pageUrl));
+                if (pageResponse.statusCode !== 200) break;
+                this.assertResponse(pageResponse, "Failed to fetch more episodes");
+                pageDoc = new Document(this.fixUtf8(pageResponse.body));
             }
+        }
 
-            const nextEl = pageDoc.selectFirst('a.next.page-numbers');
-            hasNextPage = nextEl !== null;
-            page++;
-
-            if (page > 50) break;
+        if (chapters.length === 0) {
+            throw new Error("Anime4Up: no episode links were found. If Cloudflare appeared, resolve it in Mangayomi WebView and retry.");
         }
 
         chapters.reverse();
-        
+
         return {
             name: name,
             link: url,
@@ -929,7 +1103,7 @@ class DefaultExtension extends MProvider {
             },
             {
                 type_name: 'SelectFilter',
-                name: 'النوع',
+                name: 'النوع',a
                 type: 'type',
                 state: 0,
                 values: [
@@ -946,4 +1120,3 @@ class DefaultExtension extends MProvider {
         return [];
     }
 }
-
