@@ -1103,7 +1103,7 @@ class DefaultExtension extends MProvider {
             },
             {
                 type_name: 'SelectFilter',
-                name: 'النوع',a
+                name: 'النوع',
                 type: 'type',
                 state: 0,
                 values: [
