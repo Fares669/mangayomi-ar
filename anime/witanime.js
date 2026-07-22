@@ -1,3 +1,4 @@
+// WitAnime extension for Mangayomi - improved compatibility build 0.0.24
 const mangayomiSources = [{
     "name": "WitAnime",
     "lang": "ar",
@@ -6,9 +7,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.23",
+    "version": "0.0.24",
     "pkgPath": "",
-    "notes": "Add episode upload dates",
+    "notes": "Fix lists, episode details, dates, and current video servers",
     "preferences": [
         {
             "key": "pref_quality",
@@ -28,11 +29,165 @@ const mangayomiSources = [{
 }];
 
 class DefaultExtension extends MProvider {
+    get baseUrl() {
+        return String(mangayomiSources[0].baseUrl || "").replace(/\/+$/, "");
+    }
+
     getHeaders(url) {
+        // Let Mangayomi attach the saved WebView User-Agent together with
+        // first-party cookies when WitAnime enables a Cloudflare challenge.
         return {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://witanime.you/"
+            "Referer": this.baseUrl + "/",
+            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8"
         };
+    }
+
+    elementText(element) {
+        try {
+            return element && element.text ? String(element.text).trim() : "";
+        } catch (e) {
+            return "";
+        }
+    }
+
+    elementAttr(element, name) {
+        try {
+            const value = element ? element.attr(name) : "";
+            return value ? String(value).trim() : "";
+        } catch (e) {
+            return "";
+        }
+    }
+
+    elementHref(element) {
+        try {
+            const href = element && element.getHref
+                ? element.getHref
+                : this.elementAttr(element, "href");
+            return href ? this.absoluteUrl(String(href).trim(), this.baseUrl + "/") : "";
+        } catch (e) {
+            return "";
+        }
+    }
+
+    elementImage(element) {
+        if (!element) return "";
+
+        const candidates = [
+            this.elementAttr(element, "data-src"),
+            this.elementAttr(element, "data-lazy-src"),
+            this.elementAttr(element, "data-original")
+        ];
+        try {
+            if (element.getSrc) candidates.push(String(element.getSrc).trim());
+        } catch (e) {}
+        candidates.push(this.elementAttr(element, "src"));
+
+        for (const candidate of candidates) {
+            if (candidate && !candidate.startsWith("data:")) {
+                return this.absoluteUrl(candidate, this.baseUrl + "/");
+            }
+        }
+        return "";
+    }
+
+    selectElements(root, selectors) {
+        for (const selector of selectors) {
+            try {
+                const elements = root.select(selector);
+                if (elements && elements.length > 0) return elements;
+            } catch (e) {}
+        }
+        return [];
+    }
+
+    firstElement(root, selectors, valueGetter) {
+        for (const selector of selectors) {
+            try {
+                const element = root.selectFirst(selector);
+                if (valueGetter.call(this, element)) return element;
+            } catch (e) {}
+        }
+        return null;
+    }
+
+    parseAnimeCard(card) {
+        const titleEl = this.firstElement(card, [
+            "div.anime-card-title h3 a",
+            "div.anime-card-details h3 a",
+            "h3.anime-card-title a"
+        ], function (element) {
+            return this.elementText(element) || this.elementHref(element);
+        });
+        const overlayEl = this.firstElement(card, [
+            "div.anime-card-poster a.overlay",
+            "a.overlay"
+        ], this.elementHref);
+        const imgEl = this.firstElement(card, [
+            "div.anime-card-poster img",
+            "img.img-responsive",
+            "img"
+        ], this.elementImage);
+
+        const name = this.elementText(titleEl) || this.elementAttr(imgEl, "alt");
+        const link = this.elementHref(titleEl) || this.elementHref(overlayEl);
+        if (!name || !link) return null;
+
+        return { name: name, link: link, imageUrl: this.elementImage(imgEl) };
+    }
+
+    parseEpisodeCard(card) {
+        const animeEl = this.firstElement(card, [
+            "div.ep-card-anime-title h3 a",
+            "div.anime-card-title h3 a",
+            "a[href*='/anime/']"
+        ], function (element) {
+            return this.elementText(element) || this.elementHref(element);
+        });
+        const episodeEl = this.firstElement(card, [
+            "div.episodes-card-title h3 a",
+            "a[href*='/episode/']"
+        ], function (element) {
+            return this.elementText(element) || this.elementHref(element);
+        });
+        const imgEl = this.firstElement(card, [
+            "div.episodes-card img",
+            "div.anime-card-poster img",
+            "img.img-responsive",
+            "img"
+        ], this.elementImage);
+
+        const animeName = this.elementText(animeEl);
+        const episodeName = this.elementText(episodeEl);
+        const imageAlt = this.elementAttr(imgEl, "alt");
+        const name = animeName
+            ? (episodeName ? animeName + " - " + episodeName : animeName)
+            : (imageAlt || episodeName);
+        const link = this.elementHref(animeEl) || this.elementHref(episodeEl);
+        if (!name || !link) return null;
+
+        return { name: name, link: link, imageUrl: this.elementImage(imgEl) };
+    }
+
+    parseCards(cards, parser) {
+        const list = [];
+        const seen = {};
+        for (const card of cards) {
+            const item = parser.call(this, card);
+            if (!item || seen[item.link]) continue;
+            seen[item.link] = true;
+            list.push(item);
+        }
+        return list;
+    }
+
+    documentHasNextPage(doc) {
+        const nextEl = this.firstElement(doc, [
+            "a.next.page-numbers",
+            "ul.pagination a.next",
+            "a[rel='next']"
+        ], this.elementHref);
+        return this.elementHref(nextEl).length > 0;
     }
     
     get supportsLatest() {
@@ -103,8 +258,8 @@ class DefaultExtension extends MProvider {
     async getPopular(page) {
         const client = new Client();
         const url = page === 1 
-            ? "https://witanime.you/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8a/"
-            : `https://witanime.you/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8a/page/${page}/`;
+            ? this.baseUrl + "/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8a/"
+            : `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8a/page/${page}/`;
             
         const res = await client.get(url, this.getHeaders(url));
         if (res.statusCode !== 200) {
@@ -112,39 +267,21 @@ class DefaultExtension extends MProvider {
         }
         
         const doc = new Document(res.body);
-        const cards = doc.select('div.anime-card-container');
-        const list = [];
-        for (const card of cards) {
-            const titleEl = card.selectFirst('div.anime-card-title h3 a');
-            const overlayEl = card.selectFirst('div.anime-card-poster a.overlay');
-            const imgEl = card.selectFirst('div.anime-card-poster img');
-            
-            if (titleEl && imgEl) {
-                const name = titleEl.text.trim();
-                const link = titleEl.getHref || (overlayEl ? overlayEl.getHref : "");
-                const imageUrl = imgEl.getSrc || imgEl.attr('src') || "";
-                list.push({
-                    name: name,
-                    link: link,
-                    imageUrl: imageUrl
-                });
-            }
-        }
-        
-        const nextEl = doc.selectFirst('a.next.page-numbers');
-        const hasNextPage = nextEl !== null;
-        
+        const cards = this.selectElements(doc, [
+            "div.anime-card-container",
+            "div.anime-card-poster div.ehover6"
+        ]);
         return {
-            list: list,
-            hasNextPage: hasNextPage
+            list: this.parseCards(cards, this.parseAnimeCard),
+            hasNextPage: this.documentHasNextPage(doc)
         };
     }
     
     async getLatestUpdates(page) {
         const client = new Client();
         const url = page === 1 
-            ? "https://witanime.you/episode/"
-            : `https://witanime.you/episode/page/${page}/`;
+            ? `${this.baseUrl}/episode/`
+            : `${this.baseUrl}/episode/page/${page}/`;
             
         const res = await client.get(url, this.getHeaders(url));
         if (res.statusCode !== 200) {
@@ -152,34 +289,16 @@ class DefaultExtension extends MProvider {
         }
         
         const doc = new Document(res.body);
-        const cards = doc.select('div.anime-card-container');
-        const list = [];
-        for (const card of cards) {
-            const titleEl = card.selectFirst('div.anime-card-details div.anime-card-title h3 a');
-            const imgEl = card.selectFirst('div.anime-card-poster img');
-            const epEl = card.selectFirst('div.episodes-card-title h3 a');
-            
-            if (titleEl && imgEl) {
-                let name = titleEl.text.trim();
-                if (epEl) {
-                    name = name + " - " + epEl.text.trim();
-                }
-                const link = titleEl.getHref || "";
-                const imageUrl = imgEl.getSrc || imgEl.attr('src') || "";
-                list.push({
-                    name: name,
-                    link: link,
-                    imageUrl: imageUrl
-                });
-            }
+        let cards = this.selectElements(doc, ["div.episodes-card-container"]);
+        let list = this.parseCards(cards, this.parseEpisodeCard);
+        if (list.length === 0) {
+            cards = this.selectElements(doc, ["div.anime-card-container"]);
+            list = this.parseCards(cards, this.parseEpisodeCard);
         }
-        
-        const nextEl = doc.selectFirst('a.next.page-numbers');
-        const hasNextPage = nextEl !== null;
-        
+
         return {
             list: list,
-            hasNextPage: hasNextPage
+            hasNextPage: this.documentHasNextPage(doc)
         };
     }
     
@@ -189,8 +308,8 @@ class DefaultExtension extends MProvider {
         
         if (query && query.trim().length > 0) {
             url = page === 1
-                ? `https://witanime.you/?s=${encodeURIComponent(query)}&search_param=animes`
-                : `https://witanime.you/page/${page}/?s=${encodeURIComponent(query)}&search_param=animes`;
+                ? `${this.baseUrl}/?s=${encodeURIComponent(query)}&search_param=animes`
+                : `${this.baseUrl}/page/${page}/?s=${encodeURIComponent(query)}&search_param=animes`;
         } else {
             let filterPath = "";
             if (filters && filters.length > 0) {
@@ -203,8 +322,8 @@ class DefaultExtension extends MProvider {
             }
             if (filterPath.length > 0) {
                 url = page === 1
-                    ? `https://witanime.you/${filterPath}`
-                    : `https://witanime.you/${filterPath}page/${page}/`;
+                    ? `${this.baseUrl}/${filterPath}`
+                    : `${this.baseUrl}/${filterPath}page/${page}/`;
             } else {
                 return await this.getPopular(page);
             }
@@ -219,31 +338,13 @@ class DefaultExtension extends MProvider {
         }
         
         const doc = new Document(res.body);
-        const cards = doc.select('div.anime-card-container');
-        const list = [];
-        for (const card of cards) {
-            const titleEl = card.selectFirst('div.anime-card-title h3 a');
-            const overlayEl = card.selectFirst('div.anime-card-poster a.overlay');
-            const imgEl = card.selectFirst('div.anime-card-poster img');
-            
-            if (titleEl && imgEl) {
-                const name = titleEl.text.trim();
-                const link = titleEl.getHref || (overlayEl ? overlayEl.getHref : "");
-                const imageUrl = imgEl.getSrc || imgEl.attr('src') || "";
-                list.push({
-                    name: name,
-                    link: link,
-                    imageUrl: imageUrl
-                });
-            }
-        }
-        
-        const nextEl = doc.selectFirst('a.next.page-numbers');
-        const hasNextPage = nextEl !== null;
-        
+        const cards = this.selectElements(doc, [
+            "div.anime-card-container",
+            "div.anime-card-poster div.ehover6"
+        ]);
         return {
-            list: list,
-            hasNextPage: hasNextPage
+            list: this.parseCards(cards, this.parseAnimeCard),
+            hasNextPage: this.documentHasNextPage(doc)
         };
     }
     
@@ -353,7 +454,7 @@ class DefaultExtension extends MProvider {
             const slugBatch = pendingSlugs.slice(start, start + restBatchSize);
             const slugQuery = slugBatch.map((slug) => encodeURIComponent(slug)).join(",");
             const apiUrl =
-                `https://witanime.you/wp-json/wp/v2/episode` +
+                `${this.baseUrl}/wp-json/wp/v2/episode` +
                 `?slug=${slugQuery}&per_page=100&_fields=slug,link,date,date_gmt`;
 
             try {
@@ -409,9 +510,12 @@ class DefaultExtension extends MProvider {
             }
         }
 
+        // Never open hundreds of episode pages for a long-running title. If
+        // REST misses dates, only check the newest unresolved episodes.
+        const fallbackIndexes = unresolvedIndexes.slice(-12);
         const fallbackBatchSize = 4;
-        for (let start = 0; start < unresolvedIndexes.length; start += fallbackBatchSize) {
-            const indexBatch = unresolvedIndexes.slice(start, start + fallbackBatchSize);
+        for (let start = 0; start < fallbackIndexes.length; start += fallbackBatchSize) {
+            const indexBatch = fallbackIndexes.slice(start, start + fallbackBatchSize);
             const results = await Promise.all(
                 indexBatch.map(async (index) => {
                     try {
@@ -442,69 +546,119 @@ class DefaultExtension extends MProvider {
 
     async getDetail(url) {
         const client = new Client();
-        const res = await client.get(url, this.getHeaders(url));
+        let detailUrl = this.absoluteUrl(url, this.baseUrl + "/");
+        let res = await client.get(detailUrl, this.getHeaders(detailUrl));
         if (res.statusCode !== 200) {
             throw new Error(`Failed to fetch detail: ${res.statusCode}`);
         }
-        
-        const doc = new Document(res.body);
-        
-        const titleEl = doc.selectFirst('h1.anime-details-title');
-        const name = titleEl ? titleEl.text.trim() : "";
-        
-        const imgEl = doc.selectFirst('img.thumbnail.img-responsive');
-        const imageUrl = imgEl ? (imgEl.getSrc || imgEl.attr('src') || "") : "";
-        
-        const descEl = doc.selectFirst('p.anime-story');
-        const description = descEl ? descEl.text.trim() : "";
-        
+
+        let doc = new Document(res.body);
+        if (detailUrl.includes("/episode/")) {
+            const parentEl = this.firstElement(doc, [
+                "div.anime-page-link a",
+                "a[href*='/anime/']"
+            ], this.elementHref);
+            const parentUrl = this.elementHref(parentEl);
+            if (parentUrl && parentUrl !== detailUrl) {
+                const parentRes = await client.get(parentUrl, this.getHeaders(parentUrl));
+                if (parentRes.statusCode === 200) {
+                    detailUrl = parentUrl;
+                    res = parentRes;
+                    doc = new Document(res.body);
+                }
+            }
+        }
+
+        const titleEl = this.firstElement(doc, [
+            "h1.anime-details-title",
+            "h1.entry-title"
+        ], this.elementText);
+        const name = this.elementText(titleEl);
+
+        const imgEl = this.firstElement(doc, [
+            "img.thumbnail.img-responsive",
+            "div.anime-thumbnail img",
+            "img.thumbnail"
+        ], this.elementImage);
+        const imageUrl = this.elementImage(imgEl);
+
+        const descEl = this.firstElement(doc, [
+            "p.anime-story",
+            "div.anime-story",
+            "div.entry-content p"
+        ], this.elementText);
+        const description = this.elementText(descEl);
+
         const genres = [];
+        const seenGenres = {};
         const genreElements = doc.select('a[href*="/anime-genre/"]');
         for (const element of genreElements) {
-            genres.push(element.text.trim());
-        }
-        
-        let status = 5;
-        const statusElement = doc.selectFirst('a[href*="/anime-status/"]');
-        if (statusElement) {
-            const statusText = statusElement.text.trim();
-            if (statusText.includes("يعرض الان")) {
-                status = 0;
-            } else if (statusText.includes("مكتمل")) {
-                status = 1;
+            const genre = this.elementText(element);
+            if (genre && !seenGenres[genre]) {
+                seenGenres[genre] = true;
+                genres.push(genre);
             }
         }
-        
+
+        let status = 5;
+        const statusElement = this.firstElement(doc, [
+            "a[href*='/anime-status/']"
+        ], this.elementText);
+        const statusText = this.elementText(statusElement);
+        if (statusText.includes("يعرض الان") || statusText.includes("يعرض الآن") || statusText.includes("مستمر")) {
+            status = 0;
+        } else if (statusText.includes("مكتمل") || statusText.includes("منتهي")) {
+            status = 1;
+        }
+
         const html = res.body;
-        const match = html.match(/processedEpisodeData\s*=\s*'([^']+)'/);
+        const match = html.match(/processedEpisodeData\s*=\s*(["'])([^"']+)\1/);
         const chapters = [];
         if (match) {
-            const processedEpisodeData = match[1];
-            const parts = processedEpisodeData.split('.');
-            if (parts.length === 2) {
-                const key = this.base64Decode(parts[1]);
-                const encryptedBytes = this.base64ToBytes(parts[0]);
-                let decryptedStr = "";
-                for (let i = 0; i < encryptedBytes.length; i++) {
-                    decryptedStr += String.fromCharCode(encryptedBytes[i] ^ key.charCodeAt(i % key.length));
-                }
-                const episodes = JSON.parse(decryptedStr);
-                const episodeDates = await this.getEpisodeUploadDates(client, episodes);
+            try {
+                const processedEpisodeData = match[2];
+                const parts = processedEpisodeData.split('.');
+                if (parts.length === 2) {
+                    const key = this.base64Decode(parts[1]);
+                    if (!key) throw new Error("Empty episode key");
 
-                for (let i = 0; i < episodes.length; i++) {
-                    const ep = episodes[i];
-                    chapters.push({
-                        name: ep.type + " " + ep.number,
-                        url: ep.url,
-                        dateUpload: episodeDates[i]
-                    });
+                    const encryptedBytes = this.base64ToBytes(parts[0]);
+                    let decryptedStr = "";
+                    for (let i = 0; i < encryptedBytes.length; i++) {
+                        decryptedStr += String.fromCharCode(
+                            encryptedBytes[i] ^ key.charCodeAt(i % key.length)
+                        );
+                    }
+
+                    const episodes = JSON.parse(decryptedStr);
+                    if (!Array.isArray(episodes)) throw new Error("Invalid episode data");
+                    const episodeDates = await this.getEpisodeUploadDates(client, episodes);
+
+                    for (let i = 0; i < episodes.length; i++) {
+                        const ep = episodes[i] || {};
+                        const episodeUrl = this.absoluteUrl(ep.url || "", detailUrl);
+                        if (!episodeUrl) continue;
+
+                        const type = ep.type ? String(ep.type).trim() : "الحلقة";
+                        const number = ep.number !== null && ep.number !== undefined
+                            ? String(ep.number).trim()
+                            : "";
+                        chapters.push({
+                            name: (type + " " + number).trim(),
+                            url: episodeUrl,
+                            thumbnailUrl: this.absoluteUrl(ep.screenshot || "", detailUrl),
+                            dateUpload: episodeDates[i] || "0"
+                        });
+                    }
                 }
+            } catch (e) {
+                console.log(`Failed to decode WitAnime episodes: ${e}`);
             }
         }
-        
+
         return {
             name: name,
-            link: url,
+            link: detailUrl,
             imageUrl: imageUrl,
             description: description,
             genre: genres,
@@ -517,7 +671,7 @@ class DefaultExtension extends MProvider {
         const client = new Client();
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://witanime.you/"
+            "Referer": this.baseUrl + "/"
         };
         const res = await client.get(url, headers);
         if (res.statusCode !== 200) {
@@ -593,12 +747,10 @@ class DefaultExtension extends MProvider {
             return m ? m[1] : "";
         }
         
-        if (masterUrl.startsWith("/")) {
-            masterUrl = "https://" + getHost(url) + masterUrl;
-        }
+        masterUrl = this.absoluteUrl(masterUrl, url);
+        if (!masterUrl) return [];
         
         const playerHost = getHost(url);
-        const masterHost = getHost(masterUrl);
         const playlistHeaders = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "*/*",
@@ -612,16 +764,9 @@ class DefaultExtension extends MProvider {
         }
         
         const masterPlaylist = playlistRes.body;
-        const pathEndIndex = masterUrl.indexOf('?');
-        let cleanUrl = pathEndIndex !== -1 ? masterUrl.substring(0, pathEndIndex) : masterUrl;
-        let masterBase = cleanUrl.substring(0, cleanUrl.lastIndexOf('/')) + '/';
-        
         const separator = '#EXT-X-STREAM-INF:';
         const parts = masterPlaylist.split(separator);
         const videos = [];
-        const onlyUaHeaders = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        };
         
         for (let i = 1; i < parts.length; i++) {
             const part = parts[i];
@@ -633,24 +778,36 @@ class DefaultExtension extends MProvider {
                 resolution = "Video";
             }
             
-            const firstNewlineIndex = part.indexOf('\n');
-            if (firstNewlineIndex !== -1) {
-                let afterNewline = part.substring(firstNewlineIndex + 1).trim();
-                const secondNewlineIndex = afterNewline.indexOf('\n');
-                let subPath = secondNewlineIndex !== -1 ? afterNewline.substring(0, secondNewlineIndex).trim() : afterNewline;
-                
-                if (subPath.length > 0) {
-                    const videoUrl = subPath.startsWith("http") ? subPath : (masterBase + subPath);
-                    videos.push({
-                        url: videoUrl,
-                        quality: `${prefix} - ${resolution}`,
-                        originalUrl: videoUrl,
-                        headers: onlyUaHeaders
-                    });
+            const lines = part.split(/\r?\n/);
+            let subPath = "";
+            for (let lineIndex = 1; lineIndex < lines.length; lineIndex++) {
+                const line = lines[lineIndex].trim();
+                if (line && !line.startsWith("#")) {
+                    subPath = line;
+                    break;
                 }
             }
+
+            const videoUrl = this.absoluteUrl(subPath, masterUrl);
+            if (videoUrl) {
+                videos.push({
+                    url: videoUrl,
+                    quality: `${prefix} - ${resolution}`,
+                    originalUrl: videoUrl,
+                    headers: playlistHeaders
+                });
+            }
         }
-        
+
+        if (videos.length === 0 && masterPlaylist.includes("#EXTM3U")) {
+            videos.push({
+                url: masterUrl,
+                quality: `${prefix} - Auto`,
+                originalUrl: masterUrl,
+                headers: playlistHeaders
+            });
+        }
+
         return videos;
     }
 
@@ -658,7 +815,7 @@ class DefaultExtension extends MProvider {
         const client = new Client();
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://witanime.you/"
+            "Referer": this.baseUrl + "/"
         };
         const res = await client.get(url, headers);
         if (res.statusCode !== 200) {
@@ -858,37 +1015,32 @@ class DefaultExtension extends MProvider {
     }
     
     absoluteUrl(subPath, masterUrl) {
-        if (subPath.startsWith("http")) return subPath;
-        const pathEndIndex = masterUrl.indexOf('?');
-        let cleanUrl = pathEndIndex !== -1 ? masterUrl.substring(0, pathEndIndex) : masterUrl;
-        let masterBase = cleanUrl.substring(0, cleanUrl.lastIndexOf('/')) + '/';
-        if (subPath.startsWith("/")) {
-            const hostMatch = masterUrl.match(/(https?:\/\/[^\/]+)/);
-            const host = hostMatch ? hostMatch[1] : "";
-            return host + subPath;
+        let value = subPath === null || subPath === undefined
+            ? ""
+            : String(subPath).trim().replace(/&amp;/g, "&");
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+
+        const base = masterUrl ? String(masterUrl) : this.baseUrl + "/";
+        const schemeMatch = base.match(/^(https?):/i);
+        if (value.startsWith("//")) {
+            return (schemeMatch ? schemeMatch[1] : "https") + ":" + value;
         }
-        return masterBase + subPath;
-    }
 
-    base64Encode(str) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-        let result = '';
-        let i = 0;
-        while (i < str.length) {
-            const byte1 = str.charCodeAt(i++);
-            const byte2 = i < str.length ? str.charCodeAt(i++) : NaN;
-            const byte3 = i < str.length ? str.charCodeAt(i++) : NaN;
+        const cleanUrl = base.split("#")[0].split("?")[0];
+        if (value.startsWith("?")) return cleanUrl + value;
 
-            const enc1 = byte1 >> 2;
-            const enc2 = ((byte1 & 3) << 4) | (isNaN(byte2) ? 0 : (byte2 >> 4));
-            const enc3 = isNaN(byte2) ? 64 : (((byte2 & 15) << 2) | (isNaN(byte3) ? 0 : (byte3 >> 6)));
-            const enc4 = isNaN(byte3) ? 64 : (byte3 & 63);
+        const hostMatch = base.match(/^(https?:\/\/[^\/]+)/i);
+        const host = hostMatch ? hostMatch[1] : "";
+        if (value.startsWith("/")) return host + value;
 
-            result += chars.charAt(enc1) + chars.charAt(enc2) +
-                      (enc3 === 64 ? '=' : chars.charAt(enc3)) +
-                      (enc4 === 64 ? '=' : chars.charAt(enc4));
+        let masterBase = cleanUrl.substring(0, cleanUrl.lastIndexOf("/") + 1);
+        while (value.startsWith("../")) {
+            value = value.substring(3);
+            masterBase = masterBase.replace(/[^\/]+\/$/, "");
         }
-        return result;
+        if (value.startsWith("./")) value = value.substring(2);
+        return masterBase + value;
     }
 
     async customDailymotionExtractor(url, prefix) {
@@ -913,51 +1065,15 @@ class DefaultExtension extends MProvider {
             return u.replace(/\\\//g, '/').replace(/\\\\/g, '');
         };
 
-        // The master HLS manifest URL contains all quality variants AND audio group
-        // declarations. Returning the master URL for each quality label means the
-        // player receives a complete, valid HLS manifest with audio for every entry.
-        // This is exactly what Dailymotion's own player does and ensures reliable playback.
-        const buildQualityEntries = (masterUrl, qualities) => {
-            const qualityMap = [
-                { label: "1080p", keys: ["1080"] },
-                { label: "720p",  keys: ["720"] },
-                { label: "480p",  keys: ["480"] },
-                { label: "380p",  keys: ["380"] },
-                { label: "240p",  keys: ["240"] },
-                { label: "144p",  keys: ["144"] }
-            ];
-
-            const videos = [];
-            for (const q of qualityMap) {
-                let found = false;
-                for (const key of q.keys) {
-                    if (qualities[key] && qualities[key].length > 0) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) continue;
-
-                // Append unique fragment to prevent Mangayomi from deduplicating same-URL entries
-                videos.push({
-                    url: masterUrl + `#q=${q.label.replace('p', '')}`,
-                    quality: `${prefix} Dailymotion - ${q.label}`,
-                    originalUrl: masterUrl,
-                    headers: dmHeaders
-                });
-            }
-
-            if (videos.length === 0) {
-                videos.push({
-                    url: masterUrl,
-                    quality: `${prefix} Dailymotion - Auto`,
-                    originalUrl: masterUrl,
-                    headers: dmHeaders
-                });
-            }
-
-            return videos;
-        };
+        // Keep the complete master manifest so Dailymotion's separate audio
+        // group remains available. Fake per-quality fragments do not select a
+        // quality and only create duplicate entries in Mangayomi.
+        const buildQualityEntries = (masterUrl) => [{
+            url: masterUrl,
+            quality: `${prefix} Dailymotion - Auto`,
+            originalUrl: masterUrl,
+            headers: dmHeaders
+        }];
 
         // Use the Dailymotion metadata API (single request - fast)
         try {
@@ -972,7 +1088,7 @@ class DefaultExtension extends MProvider {
                 if (qualities && qualities.auto && qualities.auto.length > 0) {
                     const masterUrl = normalizeUrl(qualities.auto[0].url);
                     if (masterUrl) {
-                        return buildQualityEntries(masterUrl, qualities);
+                        return buildQualityEntries(masterUrl);
                     }
                 }
             }
@@ -985,24 +1101,14 @@ class DefaultExtension extends MProvider {
             const embedUrl = `https://www.dailymotion.com/embed/video/${videoId}`;
             const res = await client.get(embedUrl, {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://witanime.you/"
+                "Referer": this.baseUrl + "/"
             });
             if (res.statusCode === 200) {
                 const m3u8Match = res.body.match(/"manifestUrl"\s*:\s*"([^"]+)"/);
                 if (m3u8Match) {
                     const masterUrl = normalizeUrl(m3u8Match[1]);
                     if (masterUrl) {
-                        const videos = [];
-                        const standardQualities = ['1080p', '720p', '480p', '380p'];
-                        for (const q of standardQualities) {
-                            videos.push({
-                                url: masterUrl + `#q=${q.replace('p', '')}`,
-                                quality: `${prefix} Dailymotion - ${q}`,
-                                originalUrl: masterUrl,
-                                headers: dmHeaders
-                            });
-                        }
-                        return videos;
+                        return buildQualityEntries(masterUrl);
                     }
                 }
             }
@@ -1174,14 +1280,34 @@ class DefaultExtension extends MProvider {
             return [];
         }
         
-        const resourceRegistry = JSON.parse(this.base64Decode(zgVal));
-        const configRegistry = JSON.parse(this.base64Decode(zhVal));
+        let resourceRegistry;
+        let configRegistry;
+        try {
+            resourceRegistry = JSON.parse(this.base64Decode(zgVal));
+            configRegistry = JSON.parse(this.base64Decode(zhVal));
+        } catch (e) {
+            console.log(`Failed to decode video registries: ${e}`);
+            return [];
+        }
+
+        const registryValue = (registry, serverId) => {
+            if (!registry || serverId === null || serverId === undefined) return null;
+            if (Array.isArray(registry)) {
+                const index = parseInt(serverId, 10);
+                return isNaN(index) || index < 0 || index >= registry.length
+                    ? null
+                    : registry[index];
+            }
+            return registry[String(serverId)] !== undefined
+                ? registry[String(serverId)]
+                : null;
+        };
         
         const doc = new Document(html);
         const serverElements = doc.select('a.server-link');
         const videos = [];
         const apiKey = "23a97133-caf3-4eb4-9466-93d0a4ff8198";
-        const wishDomains = ["streamwish", "hgcloud.to", "hgplaycdn.com", "hglamioz.com", "niramirus.com", "playnixes.com", "medixiru.com", "hanerix.com", "audinifer.com", "vibuxer.com", "masukestin.com", "lulustream", "lulu"];
+        const wishDomains = ["streamwish", "strwish", "wishfast", "hglink.to", "hgcloud.to", "hgplaycdn.com", "hglamioz.com", "niramirus.com", "playnixes.com", "medixiru.com", "hanerix.com", "audinifer.com", "vibuxer.com", "masukestin.com", "lulustream", "lulu"];
         
         // Run each server's extraction concurrently so a slow/dead host
         // (e.g. geoblocked videa.hu DNS hanging ~11s) cannot stall the whole
@@ -1201,6 +1327,7 @@ class DefaultExtension extends MProvider {
 
                 if (isStreamWish) {
                     streamwishUrl = streamwishUrl.replace("hgcloud.to", "hgplaycdn.com")
+                                                 .replace("hglink.to", "hgplaycdn.com")
                                                  .replace("streamwish.to", "hgplaycdn.com")
                                                  .replace("streamwish.com", "hgplaycdn.com")
                                                  .replace("lulustream.com", "hgplaycdn.com");
@@ -1227,7 +1354,7 @@ class DefaultExtension extends MProvider {
                 } else if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
                     const yonaHeaders = {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Referer": "https://witanime.you/"
+                        "Referer": this.baseUrl + "/"
                     };
                     const yonaRes = await client.get(decoded, yonaHeaders);
                     if (yonaRes.statusCode === 200) {
@@ -1248,6 +1375,7 @@ class DefaultExtension extends MProvider {
 
                                 if (isSubStreamWish) {
                                     subUrl = subUrl.replace("hgcloud.to", "hgplaycdn.com")
+                                                   .replace("hglink.to", "hgplaycdn.com")
                                                    .replace("streamwish.to", "hgplaycdn.com")
                                                    .replace("streamwish.com", "hgplaycdn.com")
                                                    .replace("lulustream.com", "hgplaycdn.com");
@@ -1297,30 +1425,52 @@ class DefaultExtension extends MProvider {
             return [];
         };
 
+        const withTimeout = async (promise, label) => {
+            let timerId = null;
+            const timeoutGuard = new Promise((resolve) => {
+                timerId = setTimeout(() => {
+                    console.log(`${label} timed out`);
+                    resolve([]);
+                }, 15000);
+            });
+            const result = await Promise.race([promise, timeoutGuard]);
+            if (timerId !== null && typeof clearTimeout === "function") {
+                clearTimeout(timerId);
+            }
+            return result;
+        };
+
         const serverPromises = [];
         for (const element of serverElements) {
             const serverIdStr = element.attr('data-server-id');
             if (!serverIdStr) continue;
 
             const serverId = parseInt(serverIdStr, 10);
-            if (serverId >= resourceRegistry.length) continue;
+            if (isNaN(serverId)) continue;
 
             const serverNameSpan = element.selectFirst('span.ser');
-            const serverName = serverNameSpan ? serverNameSpan.text.trim() : `Server ${serverId}`;
+            const serverName = this.elementText(serverNameSpan) || `Server ${serverId}`;
 
-            const resData = resourceRegistry[serverId];
-            const confData = configRegistry[serverId];
+            const resData = registryValue(resourceRegistry, serverIdStr);
+            const confData = registryValue(configRegistry, serverIdStr);
+            if (typeof resData !== "string" || !confData || !Array.isArray(confData.d) || !confData.k) {
+                continue;
+            }
 
             const resCleaned = resData.split('').reverse().join('').replace(/[^A-Za-z0-9\+\/\=]/g, '');
 
             const k_b64 = confData.k;
             const indexVal = parseInt(this.base64Decode(k_b64), 10);
+            if (isNaN(indexVal) || indexVal < 0 || indexVal >= confData.d.length) continue;
             const offset = confData.d[indexVal];
 
             let decoded = this.base64Decode(resCleaned);
-            if (offset > 0) {
+            if (typeof offset === "number" && offset > 0) {
                 decoded = decoded.slice(0, -offset);
             }
+
+            decoded = decoded.trim();
+            if (!/^https?:\/\//i.test(decoded)) continue;
 
             if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
                 decoded += "&apiKey=" + apiKey;
@@ -1329,10 +1479,10 @@ class DefaultExtension extends MProvider {
             // Cap each server at 15s so a hanging/dead host (e.g. geoblocked
             // videa.hu) can never block the whole isolate. Loser servers simply
             // contribute nothing while the rest resolve.
-            const timeoutGuard = new Promise((resolve) => {
-                setTimeout(() => { console.log(`Server ${serverName} timed out`); resolve([]); }, 15000);
-            });
-            serverPromises.push(Promise.race([extractFromServer(decoded, serverName), timeoutGuard]));
+            serverPromises.push(withTimeout(
+                extractFromServer(decoded, serverName),
+                `Server ${serverName}`
+            ));
         }
 
         // Parse download qualities for Mp4Upload
@@ -1398,10 +1548,10 @@ class DefaultExtension extends MProvider {
                                         }
                                         const finalUrl = arranged.join("");
                                         if (finalUrl) {
-                                            const mp4TimeoutGuard = new Promise((resolve) => {
-                                                setTimeout(() => { console.log(`Mp4Upload download ${qualityLabel} timed out`); resolve([]); }, 15000);
-                                            });
-                                            serverPromises.push(Promise.race([extractFromMp4UploadDownload(finalUrl, qualityLabel), mp4TimeoutGuard]));
+                                            serverPromises.push(withTimeout(
+                                                extractFromMp4UploadDownload(finalUrl, qualityLabel),
+                                                `Mp4Upload download ${qualityLabel}`
+                                            ));
                                         }
                                     } catch (err) {
                                         console.log(`Decrypt error for index ${dataIndex}: ${err}`);
@@ -1434,7 +1584,7 @@ class DefaultExtension extends MProvider {
         }
 
         const getQualityRank = (qualityStr) => {
-            const q = qualityStr.toLowerCase();
+            const q = String(qualityStr || "").toLowerCase();
             if (q.includes("1080") || q.includes("fhd")) return 1080;
             if (q.includes("720") || q.includes("hd")) return 720;
             if (q.includes("480") || q.includes("sd")) return 480;
@@ -1445,7 +1595,7 @@ class DefaultExtension extends MProvider {
 
         const scoreVideo = (video) => {
             let score = 0;
-            const qualityStr = video.quality;
+            const qualityStr = String(video.quality || "");
             const qLower = qualityStr.toLowerCase();
             const prefQualityLow = preferredQuality.toLowerCase();
             const prefServerLow = preferredServer.toLowerCase();
@@ -1473,9 +1623,18 @@ class DefaultExtension extends MProvider {
             return score;
         };
 
-        videos.sort((a, b) => scoreVideo(b) - scoreVideo(a));
+        const uniqueVideos = [];
+        const seenVideos = {};
+        for (const video of videos) {
+            if (!video || !video.url) continue;
+            const key = String(video.url) + "|" + String(video.originalUrl || "");
+            if (seenVideos[key]) continue;
+            seenVideos[key] = true;
+            uniqueVideos.push(video);
+        }
 
-        return videos;
+        uniqueVideos.sort((a, b) => scoreVideo(b) - scoreVideo(a));
+        return uniqueVideos;
     }
     
     getFilterList() {
