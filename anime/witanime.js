@@ -1,4 +1,4 @@
-// WitAnime extension for Mangayomi - configurable build 0.0.26
+// WitAnime extension for Mangayomi - configurable build 0.0.27
 const mangayomiSources = [{
     "name": "WitAnime",
     "lang": "ar",
@@ -9,7 +9,7 @@ const mangayomiSources = [{
     "itemType": 1,
     "version": "0.0.26",
     "pkgPath": "",
-    "notes": "Add GoFile qualities, preferred-server fast path, configurable URL, and optional episode dates"
+    "notes": "Detect GoFile from every encrypted download URL and refresh source preferences"
 }];
 
 class DefaultExtension extends MProvider {
@@ -1314,10 +1314,31 @@ class DefaultExtension extends MProvider {
     }
 
     getGofileContentId(url) {
-        const match = String(url || "").match(
-            /https?:\/\/(?:www\.)?gofile\.io\/d\/([^\/?#]+)/i
-        );
-        return match ? match[1] : "";
+        let value = String(url || "").trim().replace(/&amp;/g, "&");
+        const candidates = [value];
+        for (let i = 0; i < 2; i++) {
+            try {
+                const decoded = decodeURIComponent(value);
+                if (decoded === value) break;
+                value = decoded;
+                candidates.push(value);
+            } catch (e) {
+                break;
+            }
+        }
+
+        for (const candidate of candidates) {
+            let match = candidate.match(
+                /https?:\/\/(?:www\.)?gofile\.io\/(?:d|download)\/([^\/?#&]+)/i
+            );
+            if (match) return match[1];
+
+            match = candidate.match(
+                /https?:\/\/(?:www\.)?gofile\.io\/[^#]*[?&](?:c|contentId)=([^&#]+)/i
+            );
+            if (match) return match[1];
+        }
+        return "";
     }
 
     normalizeGofileQuality(fileName, qualityHint) {
@@ -1433,7 +1454,10 @@ class DefaultExtension extends MProvider {
         if (!guestToken) return null;
 
         const websiteToken = await this.getGofileWebsiteToken(client, forceRefresh);
-        const apiUrl = `https://api.gofile.io/contents/${encodeURIComponent(contentId)}`;
+        const apiUrl =
+            `https://api.gofile.io/contents/${encodeURIComponent(contentId)}` +
+            `?wt=${encodeURIComponent(websiteToken)}` +
+            "&contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1";
         try {
             const response = await client.get(apiUrl, {
                 "Accept": "application/json",
@@ -1840,8 +1864,12 @@ class DefaultExtension extends MProvider {
             
             if (mrMatch && tlMatch && sMatch) {
                 const secret = this.base64Decode(mrMatch[1]);
-                const count = parseInt(tlMatch[1], 10);
                 const sList = JSON.parse(sMatch[1]);
+                const declaredCount = parseInt(tlMatch[1], 10);
+                const count = Math.max(
+                    isNaN(declaredCount) ? 0 : declaredCount,
+                    Array.isArray(sList) ? sList.length : 0
+                );
                 
                 const pVars = {};
                 for (let i = 0; i < count; i++) {
@@ -1864,66 +1892,125 @@ class DefaultExtension extends MProvider {
                     return out;
                 };
 
-                const qualityLists = doc.select('ul.quality-list');
+                const normalizeDownloadQuality = (labelText) => {
+                    const label = String(labelText || "").trim();
+                    const lower = label.toLowerCase();
+                    if (lower.includes("1080") || lower.includes("fhd")) return "FHD";
+                    if (lower.includes("720") || /(^|[^a-z])hd([^a-z]|$)/i.test(lower)) return "HD";
+                    if (lower.includes("480") || lower.includes("sd")) return "SD";
+                    if (lower.includes("360")) return "360p";
+                    return label;
+                };
+
+                // Labels improve display names, but they are deliberately not
+                // required for extraction. WitAnime changes its download HTML
+                // more often than the encrypted _s/_p URL registry.
+                const qualityByIndex = {};
+                const qualityLists = doc.select('ul.quality-list') || [];
                 for (const ul of qualityLists) {
                     const firstLi = ul.selectFirst('li');
-                    const labelText = firstLi ? firstLi.text.trim() : "";
-                    let qualityLabel = "";
-                    if (labelText.includes("FHD")) qualityLabel = "FHD";
-                    else if (labelText.includes("HD")) qualityLabel = "HD";
-                    else if (labelText.includes("SD")) qualityLabel = "SD";
-                    else qualityLabel = labelText;
+                    const qualityLabel = normalizeDownloadQuality(
+                        firstLi ? firstLi.text : ""
+                    );
 
                     const downloadLinks = ul.select('a.download-link');
                     for (const link of downloadLinks) {
-                        const spanNotice = link.selectFirst('span.notice');
-                        const hostName = spanNotice ? spanNotice.text.trim().toLowerCase() : "";
                         const dataIndexStr = link.attr('data-index');
                         if (!dataIndexStr) continue;
 
                         const dataIndex = parseInt(dataIndexStr, 10);
-                        if (isNaN(dataIndex) || dataIndex < 0 || dataIndex >= count ||
-                            !sList[dataIndex] || !pVars[dataIndex]) continue;
-
-                        try {
-                            const seqDecrypted = decryptWitUrl(sList[dataIndex], secret);
-                            const seq = JSON.parse(seqDecrypted);
-                            const chunks = pVars[dataIndex];
-                            const decryptedChunks = chunks.map(chunk => decryptWitUrl(chunk, secret));
-
-                            const arranged = new Array(seq.length);
-                            for (let j = 0; j < seq.length; j++) {
-                                arranged[seq[j]] = decryptedChunks[j];
-                            }
-                            const finalUrl = arranged.join("").trim();
-                            const finalUrlLower = finalUrl.toLowerCase();
-
-                            if (finalUrl && (hostName.includes("mp4upload") || finalUrlLower.includes("mp4upload.com"))) {
-                                serverTasks.push({
-                                    key: "mp4upload (download)",
-                                    label: `Mp4Upload download ${qualityLabel}`,
-                                    run: () => withTimeout(
-                                        extractFromMp4UploadDownload(finalUrl, qualityLabel),
-                                        `Mp4Upload download ${qualityLabel}`
-                                    )
-                                });
-                            } else if (finalUrl && (hostName.includes("gofile") || finalUrlLower.includes("gofile.io/d/"))) {
-                                serverTasks.push({
-                                    key: "gofile (download)",
-                                    label: `GoFile download ${qualityLabel}`,
-                                    run: () => withTimeout(
-                                        this.customGofileExtractor(
-                                            finalUrl,
-                                            "GoFile (Download)",
-                                            qualityLabel
-                                        ),
-                                        `GoFile download ${qualityLabel}`
-                                    )
-                                });
-                            }
-                        } catch (err) {
-                            console.log(`Decrypt error for index ${dataIndex}: ${err}`);
+                        if (!isNaN(dataIndex) && dataIndex >= 0 && dataIndex < count) {
+                            qualityByIndex[dataIndex] = qualityLabel;
                         }
+                    }
+                }
+
+                // Some templates place links outside ul.quality-list. Preserve
+                // any quality exposed directly on those anchors when present.
+                const looseDownloadLinks = doc.select('a.download-link') || [];
+                for (const link of looseDownloadLinks) {
+                    const dataIndex = parseInt(link.attr('data-index'), 10);
+                    if (isNaN(dataIndex) || dataIndex < 0 || dataIndex >= count || qualityByIndex[dataIndex]) {
+                        continue;
+                    }
+                    qualityByIndex[dataIndex] = normalizeDownloadQuality(
+                        link.attr('data-quality') ||
+                        link.attr('data-resolution') ||
+                        link.attr('title') ||
+                        ""
+                    );
+                }
+
+                const decodeForInspection = (rawUrl) => {
+                    let value = String(rawUrl || "").trim().replace(/&amp;/g, "&");
+                    for (let attempt = 0; attempt < 2; attempt++) {
+                        try {
+                            const decoded = decodeURIComponent(value);
+                            if (decoded === value) break;
+                            value = decoded;
+                        } catch (e) {
+                            break;
+                        }
+                    }
+                    return value;
+                };
+
+                // Decrypt every registered URL. Provider-name selectors are
+                // intentionally avoided, so GoFile is found even if WitAnime
+                // renames the button or moves it to another HTML container.
+                for (let dataIndex = 0; dataIndex < count; dataIndex++) {
+                    if (!sList[dataIndex] || !pVars[dataIndex]) continue;
+
+                    try {
+                        const seqDecrypted = decryptWitUrl(sList[dataIndex], secret);
+                        const seq = JSON.parse(seqDecrypted);
+                        const chunks = pVars[dataIndex];
+                        const decryptedChunks = chunks.map((chunk) => decryptWitUrl(chunk, secret));
+
+                        const arranged = new Array(seq.length);
+                        for (let j = 0; j < seq.length; j++) {
+                            arranged[seq[j]] = decryptedChunks[j];
+                        }
+
+                        const finalUrl = arranged.join("").trim();
+                        const inspectedUrl = decodeForInspection(finalUrl);
+                        const inspectedUrlLower = inspectedUrl.toLowerCase();
+                        const qualityLabel = qualityByIndex[dataIndex] || "";
+
+                        if (inspectedUrlLower.includes("mp4upload.com")) {
+                            const mp4Match = inspectedUrl.match(
+                                /https?:\/\/(?:www\.)?mp4upload\.com\/[^\s"'<>]+/i
+                            );
+                            const mp4Url = mp4Match ? mp4Match[0] : finalUrl;
+                            serverTasks.push({
+                                key: "mp4upload (download)",
+                                label: `Mp4Upload download ${qualityLabel || dataIndex}`,
+                                run: () => withTimeout(
+                                    extractFromMp4UploadDownload(mp4Url, qualityLabel),
+                                    `Mp4Upload download ${qualityLabel || dataIndex}`
+                                )
+                            });
+                            continue;
+                        }
+
+                        const gofileContentId = this.getGofileContentId(inspectedUrl);
+                        if (gofileContentId) {
+                            const gofileUrl = `https://gofile.io/d/${encodeURIComponent(gofileContentId)}`;
+                            serverTasks.push({
+                                key: "gofile (download)",
+                                label: `GoFile download ${qualityLabel || dataIndex}`,
+                                run: () => withTimeout(
+                                    this.customGofileExtractor(
+                                        gofileUrl,
+                                        "GoFile (Download)",
+                                        qualityLabel
+                                    ),
+                                    `GoFile download ${qualityLabel || dataIndex}`
+                                )
+                            });
+                        }
+                    } catch (err) {
+                        console.log(`Decrypt error for index ${dataIndex}: ${err}`);
                     }
                 }
             }
