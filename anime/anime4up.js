@@ -6,9 +6,9 @@ const mangayomiSources = [{
     "iconUrl": "https://raw.githubusercontent.com/9vsv6/mangayomi-ar-extensions/refs/heads/main/icons/anime4up.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.8",
+    "version": "0.0.10",
     "pkgPath": "",
-    "notes": "Fix Mangayomi selectFirst fallbacks and load episodes from the episode sidebar"
+    "notes": "Avoid false Cloudflare detection on normal Anime4Up pages"
 }];
 
 class DefaultExtension extends MProvider {
@@ -76,10 +76,17 @@ class DefaultExtension extends MProvider {
 
     isCloudflareChallenge(body) {
         const html = String(body || "").toLowerCase();
-        return html.includes("<title>just a moment") ||
-            html.includes("cf-chl-") ||
-            html.includes("challenge-platform") ||
-            html.includes('id="challenge-running"');
+        const challengeTitle = /<title>\s*(just a moment|attention required)[^<]*<\/title>/i.test(html);
+        const challengePage = html.includes('id="challenge-running"') ||
+            html.includes('id="challenge-stage"') ||
+            html.includes('id="challenge-form"');
+        const browserCheck = html.includes("checking your browser") &&
+            html.includes("cloudflare");
+
+        // Normal Anime4Up pages may load Cloudflare scripts containing strings
+        // such as "cf-chl-" or "challenge-platform". Those strings alone do
+        // not mean the response is a challenge page.
+        return challengeTitle || challengePage || browserCheck;
     }
 
     assertResponse(response, label) {
