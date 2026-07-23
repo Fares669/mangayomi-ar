@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.28",
+    "version": "0.0.30",
     "pkgPath": "",
     "notes": "Generate GoFile website tokens and sync guest accounts"
 }];
@@ -742,6 +742,14 @@ class DefaultExtension extends MProvider {
                 console.log(`Failed to decode WitAnime episodes: ${e}`);
             }
         }
+        chapters.sort((a, b) => {
+    const getEpisodeNumber = (chapter) => {
+        const match = String(chapter.name || "").match(/\d+(?:\.\d+)?/);
+        return match ? parseFloat(match[0]) : 0;
+    };
+
+    return getEpisodeNumber(b) - getEpisodeNumber(a);
+});
 
         return {
             name: name,
