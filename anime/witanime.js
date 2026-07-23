@@ -1,4 +1,4 @@
-// WitAnime extension for Mangayomi - configurable build 0.0.25
+// WitAnime extension for Mangayomi - configurable build 0.0.28
 const mangayomiSources = [{
     "name": "WitAnime",
     "lang": "ar",
@@ -7,9 +7,9 @@ const mangayomiSources = [{
     "iconUrl": "https://witanime.you/wp-content/uploads/2023/08/cropped-Logo-WITU-192x192.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.0.27",
+    "version": "0.0.28",
     "pkgPath": "",
-    "notes": "Add configurable site URL, preferred quality/server, and optional episode dates"
+    "notes": "Generate GoFile website tokens and sync guest accounts"
 }];
 
 class DefaultExtension extends MProvider {
@@ -86,6 +86,7 @@ class DefaultExtension extends MProvider {
                         "Videa",
                         "Videas",
                         "DotPlay",
+                        "GoFile (Download)",
                         "Any Server"
                     ],
                     entryValues: [
@@ -97,6 +98,7 @@ class DefaultExtension extends MProvider {
                         "Videa",
                         "Videas",
                         "DotPlay",
+                        "GoFile (Download)",
                         "Any Server"
                     ]
                 }
@@ -1310,6 +1312,401 @@ class DefaultExtension extends MProvider {
         }
         return [];
     }
+
+    getGofileContentId(url) {
+        let value = String(url || "").trim().replace(/&amp;/g, "&");
+        const candidates = [value];
+        for (let i = 0; i < 2; i++) {
+            try {
+                const decoded = decodeURIComponent(value);
+                if (decoded === value) break;
+                value = decoded;
+                candidates.push(value);
+            } catch (e) {
+                break;
+            }
+        }
+
+        for (const candidate of candidates) {
+            let match = candidate.match(
+                /https?:\/\/(?:www\.)?gofile\.io\/(?:d|download)\/([^\/?#&]+)/i
+            );
+            if (match) return match[1];
+
+            match = candidate.match(
+                /https?:\/\/(?:www\.)?gofile\.io\/[^#]*[?&](?:c|contentId)=([^&#]+)/i
+            );
+            if (match) return match[1];
+        }
+        return "";
+    }
+
+    normalizeGofileQuality(fileName, qualityHint) {
+        const fileText = String(fileName || "").toLowerCase();
+        const hintText = String(qualityHint || "").toLowerCase();
+
+        // Prefer an explicit resolution in the actual filename. One GoFile
+        // folder may contain all qualities even if the surrounding WitAnime
+        // download group has a single label such as FHD.
+        if (/(^|[^0-9])2160p?([^0-9]|$)|\b4k\b/i.test(fileText)) return "2160p";
+        if (/(^|[^0-9])1080p?([^0-9]|$)|\bfhd\b/i.test(fileText)) return "1080p";
+        if (/(^|[^0-9])720p?([^0-9]|$)/i.test(fileText)) return "720p";
+        if (/(^|[^0-9])480p?([^0-9]|$)/i.test(fileText)) return "480p";
+        if (/(^|[^0-9])360p?([^0-9]|$)/i.test(fileText)) return "360p";
+
+        // WitAnime labels its download groups as FHD / HD / SD even when
+        // the GoFile filename itself does not contain a resolution.
+        if (hintText.includes("fhd")) return "1080p";
+        if (hintText.includes("hd")) return "720p";
+        if (hintText.includes("sd")) return "480p";
+        return "Video";
+    }
+
+    getGofileUserAgent() {
+        // GoFile includes the exact User-Agent in its generated website token,
+        // so the value used for hashing and HTTP requests must stay identical.
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/131.0.0.0 Safari/537.36";
+    }
+
+    getGofileLanguage() {
+        return "en-US";
+    }
+
+    sha256(value) {
+        // Small dependency-free SHA-256 implementation for Mangayomi's JS
+        // runtime. GoFile's website token is a SHA-256 digest.
+        const rotateRight = (word, bits) =>
+            (word >>> bits) | (word << (32 - bits));
+        const bytes = [];
+        const text = String(value || "");
+
+        for (let i = 0; i < text.length; i++) {
+            let code = text.charCodeAt(i);
+            if (code < 0x80) {
+                bytes.push(code);
+            } else if (code < 0x800) {
+                bytes.push(0xc0 | (code >>> 6));
+                bytes.push(0x80 | (code & 0x3f));
+            } else if (
+                code >= 0xd800 && code <= 0xdbff &&
+                i + 1 < text.length
+            ) {
+                const next = text.charCodeAt(i + 1);
+                if (next >= 0xdc00 && next <= 0xdfff) {
+                    code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+                    i++;
+                    bytes.push(0xf0 | (code >>> 18));
+                    bytes.push(0x80 | ((code >>> 12) & 0x3f));
+                    bytes.push(0x80 | ((code >>> 6) & 0x3f));
+                    bytes.push(0x80 | (code & 0x3f));
+                } else {
+                    bytes.push(0xef, 0xbf, 0xbd);
+                }
+            } else if (code >= 0xdc00 && code <= 0xdfff) {
+                bytes.push(0xef, 0xbf, 0xbd);
+            } else {
+                bytes.push(0xe0 | (code >>> 12));
+                bytes.push(0x80 | ((code >>> 6) & 0x3f));
+                bytes.push(0x80 | (code & 0x3f));
+            }
+        }
+
+        const bitLength = bytes.length * 8;
+        bytes.push(0x80);
+        while (bytes.length % 64 !== 56) bytes.push(0);
+
+        const bitLengthHigh = Math.floor(bitLength / 0x100000000);
+        const bitLengthLow = bitLength >>> 0;
+        for (let shift = 24; shift >= 0; shift -= 8) {
+            bytes.push((bitLengthHigh >>> shift) & 0xff);
+        }
+        for (let shift = 24; shift >= 0; shift -= 8) {
+            bytes.push((bitLengthLow >>> shift) & 0xff);
+        }
+
+        const constants = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+            0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+            0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+        ];
+        const hash = [
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+        ];
+        const words = new Array(64);
+
+        for (let offset = 0; offset < bytes.length; offset += 64) {
+            for (let i = 0; i < 16; i++) {
+                const index = offset + i * 4;
+                words[i] = (
+                    (bytes[index] << 24) |
+                    (bytes[index + 1] << 16) |
+                    (bytes[index + 2] << 8) |
+                    bytes[index + 3]
+                ) >>> 0;
+            }
+            for (let i = 16; i < 64; i++) {
+                const s0 = rotateRight(words[i - 15], 7) ^
+                    rotateRight(words[i - 15], 18) ^
+                    (words[i - 15] >>> 3);
+                const s1 = rotateRight(words[i - 2], 17) ^
+                    rotateRight(words[i - 2], 19) ^
+                    (words[i - 2] >>> 10);
+                words[i] = (
+                    words[i - 16] + s0 + words[i - 7] + s1
+                ) >>> 0;
+            }
+
+            let a = hash[0];
+            let b = hash[1];
+            let c = hash[2];
+            let d = hash[3];
+            let e = hash[4];
+            let f = hash[5];
+            let g = hash[6];
+            let h = hash[7];
+
+            for (let i = 0; i < 64; i++) {
+                const sum1 = rotateRight(e, 6) ^
+                    rotateRight(e, 11) ^ rotateRight(e, 25);
+                const choose = (e & f) ^ (~e & g);
+                const temp1 = (h + sum1 + choose + constants[i] + words[i]) >>> 0;
+                const sum0 = rotateRight(a, 2) ^
+                    rotateRight(a, 13) ^ rotateRight(a, 22);
+                const majority = (a & b) ^ (a & c) ^ (b & c);
+                const temp2 = (sum0 + majority) >>> 0;
+
+                h = g;
+                g = f;
+                f = e;
+                e = (d + temp1) >>> 0;
+                d = c;
+                c = b;
+                b = a;
+                a = (temp1 + temp2) >>> 0;
+            }
+
+            hash[0] = (hash[0] + a) >>> 0;
+            hash[1] = (hash[1] + b) >>> 0;
+            hash[2] = (hash[2] + c) >>> 0;
+            hash[3] = (hash[3] + d) >>> 0;
+            hash[4] = (hash[4] + e) >>> 0;
+            hash[5] = (hash[5] + f) >>> 0;
+            hash[6] = (hash[6] + g) >>> 0;
+            hash[7] = (hash[7] + h) >>> 0;
+        }
+
+        return hash.map((word) =>
+            (word >>> 0).toString(16).padStart(8, "0")
+        ).join("");
+    }
+
+    getGofileWebsiteToken(guestToken) {
+        // Mirrors GoFile's current generateWT() logic. The digest rotates every
+        // four hours and is bound to the guest token, User-Agent and language.
+        const timeBucket = Math.floor(Date.now() / 1000 / 14400);
+        const tokenInput = [
+            this.getGofileUserAgent(),
+            this.getGofileLanguage(),
+            String(guestToken || ""),
+            String(timeBucket),
+            "9844d94d963d30"
+        ].join("::");
+        return this.sha256(tokenInput);
+    }
+
+    async getGofileGuestToken(client, forceRefresh) {
+        if (forceRefresh) {
+            this._gofileGuestToken = "";
+        }
+        if (this._gofileGuestToken) {
+            return this._gofileGuestToken;
+        }
+        if (this._gofileGuestTokenPromise) {
+            return await this._gofileGuestTokenPromise;
+        }
+
+        const tokenPromise = (async () => {
+            try {
+                const response = await client.post(
+                    "https://api.gofile.io/accounts",
+                    {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-BL": this.getGofileLanguage(),
+                        "Origin": "https://gofile.io",
+                        "Referer": "https://gofile.io/",
+                        "User-Agent": this.getGofileUserAgent()
+                    },
+                    {}
+                );
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                    return "";
+                }
+
+                const payload = JSON.parse(response.body || "{}");
+                const token = payload && payload.data ? payload.data.token : "";
+                if (token) {
+                    this._gofileGuestToken = String(token);
+
+                    // GoFile's web client activates/synchronizes a new guest
+                    // account before requesting folder contents. Do the same,
+                    // but keep the token if this optional sync is rate-limited.
+                    try {
+                        await client.get(
+                            "https://api.gofile.io/accounts/website",
+                            {
+                                "Accept": "application/json",
+                                "Authorization": `Bearer ${this._gofileGuestToken}`,
+                                "X-BL": this.getGofileLanguage(),
+                                "Origin": "https://gofile.io",
+                                "Referer": "https://gofile.io/",
+                                "Cookie": `accountToken=${this._gofileGuestToken}`,
+                                "User-Agent": this.getGofileUserAgent()
+                            }
+                        );
+                    } catch (syncError) {
+                        console.log(`GoFile guest sync error: ${syncError}`);
+                    }
+                    return this._gofileGuestToken;
+                }
+            } catch (e) {
+                console.log(`GoFile guest-token error: ${e}`);
+            }
+            return "";
+        })();
+
+        this._gofileGuestTokenPromise = tokenPromise;
+        try {
+            return await tokenPromise;
+        } finally {
+            if (this._gofileGuestTokenPromise === tokenPromise) {
+                this._gofileGuestTokenPromise = null;
+            }
+        }
+    }
+
+    async requestGofileContent(client, contentId, forceRefresh) {
+        const guestToken = await this.getGofileGuestToken(client, forceRefresh);
+        if (!guestToken) return null;
+
+        const websiteToken = this.getGofileWebsiteToken(guestToken);
+        const apiUrl =
+            `https://api.gofile.io/contents/${encodeURIComponent(contentId)}` +
+            "?contentFilter=&page=1&pageSize=1000&sortField=name&sortDirection=1";
+        try {
+            const response = await client.get(apiUrl, {
+                "Accept": "application/json",
+                "Authorization": `Bearer ${guestToken}`,
+                "X-Website-Token": websiteToken,
+                "X-BL": this.getGofileLanguage(),
+                "Origin": "https://gofile.io",
+                "Referer": "https://gofile.io/",
+                "Cookie": `accountToken=${guestToken}`,
+                "User-Agent": this.getGofileUserAgent()
+            });
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+                return null;
+            }
+
+            const payload = JSON.parse(response.body || "{}");
+            if (!payload || payload.status !== "ok" || !payload.data) {
+                return null;
+            }
+            return { data: payload.data, guestToken: guestToken };
+        } catch (e) {
+            console.log(`GoFile content request error: ${e}`);
+            return null;
+        }
+    }
+
+    async customGofileExtractor(url, prefix, qualityHint) {
+        const contentId = this.getGofileContentId(url);
+        if (!contentId) return [];
+
+        const client = new Client();
+        let content = await this.requestGofileContent(client, contentId, false);
+        if (!content) {
+            // The guest account may have expired or its sync may have failed.
+            this._gofileGuestToken = "";
+            content = await this.requestGofileContent(client, contentId, true);
+        }
+        if (!content) return [];
+
+        const files = [];
+        const collectFiles = (node) => {
+            if (!node) return;
+            if (Array.isArray(node)) {
+                for (const item of node) collectFiles(item);
+                return;
+            }
+            if (typeof node !== "object") return;
+
+            const name = String(node.name || "");
+            const mimeType = String(node.mimetype || node.mimeType || "").toLowerCase();
+            const directUrl = String(node.link || node.directLink || "");
+            const looksLikeVideo =
+                mimeType.startsWith("video/") ||
+                /\.(?:mp4|mkv|webm|m4v|mov|ts)(?:$|[?#])/i.test(name) ||
+                /\.(?:mp4|mkv|webm|m4v|mov|ts)(?:$|[?#])/i.test(directUrl);
+            if (directUrl && looksLikeVideo) {
+                files.push(node);
+            }
+
+            const children = node.children || node.contents || node.childs;
+            if (children) {
+                if (Array.isArray(children)) {
+                    for (const child of children) collectFiles(child);
+                } else if (typeof children === "object") {
+                    for (const key in children) {
+                        if (Object.prototype.hasOwnProperty.call(children, key)) {
+                            collectFiles(children[key]);
+                        }
+                    }
+                }
+            }
+        };
+        collectFiles(content.data);
+
+        const videos = [];
+        const seenUrls = {};
+        const playbackHeaders = {
+            "Accept": "*/*",
+            "Referer": "https://gofile.io/",
+            "Origin": "https://gofile.io",
+            "Cookie": `accountToken=${content.guestToken}`,
+            "User-Agent": this.getGofileUserAgent()
+        };
+
+        for (const file of files) {
+            const directUrl = String(file.link || file.directLink || "");
+            if (!directUrl || seenUrls[directUrl]) continue;
+            seenUrls[directUrl] = true;
+
+            videos.push({
+                url: directUrl,
+                quality: `${prefix} - ${this.normalizeGofileQuality(file.name, qualityHint)}`,
+                originalUrl: directUrl,
+                headers: playbackHeaders
+            });
+        }
+        return videos;
+    }
     
     async getVideoList(url) {
         const client = new Client();
@@ -1361,18 +1758,17 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        if (!zgVal || !zhVal) {
-            return [];
-        }
-        
-        let resourceRegistry;
-        let configRegistry;
-        try {
-            resourceRegistry = JSON.parse(this.base64Decode(zgVal));
-            configRegistry = JSON.parse(this.base64Decode(zhVal));
-        } catch (e) {
-            console.log(`Failed to decode video registries: ${e}`);
-            return [];
+        // Download hosts such as GoFile use a separate encrypted registry.
+        // Keep parsing them even if the streaming-server registry is absent.
+        let resourceRegistry = {};
+        let configRegistry = {};
+        if (zgVal && zhVal) {
+            try {
+                resourceRegistry = JSON.parse(this.base64Decode(zgVal));
+                configRegistry = JSON.parse(this.base64Decode(zhVal));
+            } catch (e) {
+                console.log(`Failed to decode video registries: ${e}`);
+            }
         }
 
         const registryValue = (registry, serverId) => {
@@ -1391,13 +1787,34 @@ class DefaultExtension extends MProvider {
         const doc = new Document(html);
         const serverElements = doc.select('a.server-link');
         const videos = [];
+        const preferredQuality = String(
+            this.getPreferenceValue("pref_quality", "1080p") || "1080p"
+        );
+        const preferredServer = String(
+            this.getPreferenceValue("pref_server", "Mp4Upload") || "Mp4Upload"
+        );
         const apiKey = "23a97133-caf3-4eb4-9466-93d0a4ff8198";
         const wishDomains = ["streamwish", "strwish", "wishfast", "hglink.to", "hgcloud.to", "hgplaycdn.com", "hglamioz.com", "niramirus.com", "playnixes.com", "medixiru.com", "hanerix.com", "audinifer.com", "vibuxer.com", "masukestin.com", "lulustream", "lulu"];
+
+        const getServerKey = (serverUrl, serverName) => {
+            const value = (String(serverUrl || "") + " " + String(serverName || "")).toLowerCase();
+            if (value.includes("any server") || value.trim() === "any") return "any server";
+            if (value.includes("gofile")) return "gofile (download)";
+            if (value.includes("mp4upload") && value.includes("download")) return "mp4upload (download)";
+            if (value.includes("yonaplay")) return "yonaplay";
+            if (wishDomains.some((domain) => value.includes(domain))) return "streamwish";
+            if (value.includes("mp4upload")) return "mp4upload";
+            if (value.includes("dailymotion") || value.includes("dai.ly")) return "dailymotion";
+            if (value.includes("videas.fr") || value.includes("videas")) return "videas";
+            if (value.includes("videa.hu") || value.includes("videakid.hu") || value.includes("videa")) return "videa";
+            if (value.includes("dotplay")) return "dotplay";
+            if (value.includes("4shared")) return "4shared";
+            return String(serverName || "").trim().toLowerCase();
+        };
+        const preferredServerKey = getServerKey("", preferredServer);
         
-        // Run each server's extraction concurrently so a slow/dead host
-        // (e.g. geoblocked videa.hu DNS hanging ~11s) cannot stall the whole
-        // isolate and trigger an "isolate response timeout". Total wall time
-        // becomes the slowest single server instead of the sum of all of them.
+        // When multiple hosts are needed, run them concurrently so a slow/dead
+        // host cannot turn the total wait into the sum of every server timeout.
         const extractFromServer = async (decoded, serverName) => {
             const results = [];
             try {
@@ -1436,6 +1853,13 @@ class DefaultExtension extends MProvider {
                 } else if (decoded.includes("dotplay.net")) {
                     const dpVideos = await this.customDotPlayExtractor(decoded, serverName);
                     if (dpVideos) results.push(...dpVideos);
+                } else if (decoded.includes("gofile.io/d/")) {
+                    const gofileVideos = await this.customGofileExtractor(
+                        decoded,
+                        "GoFile (Download)",
+                        ""
+                    );
+                    if (gofileVideos) results.push(...gofileVideos);
                 } else if (decoded.startsWith("https://yonaplay.net/embed.php?id=")) {
                     const yonaHeaders = {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -1484,6 +1908,13 @@ class DefaultExtension extends MProvider {
                                 } else if (subUrl.includes("dotplay.net")) {
                                     const dpVideos = await this.customDotPlayExtractor(subUrl, `${serverName} (Yona)`);
                                     if (dpVideos) results.push(...dpVideos);
+                                } else if (subUrl.includes("gofile.io/d/")) {
+                                    const gofileVideos = await this.customGofileExtractor(
+                                        subUrl,
+                                        "GoFile (Download)",
+                                        ""
+                                    );
+                                    if (gofileVideos) results.push(...gofileVideos);
                                 }
                             }
                         }
@@ -1518,14 +1949,18 @@ class DefaultExtension extends MProvider {
                     resolve([]);
                 }, 15000);
             });
-            const result = await Promise.race([promise, timeoutGuard]);
-            if (timerId !== null && typeof clearTimeout === "function") {
-                clearTimeout(timerId);
+            try {
+                return await Promise.race([promise, timeoutGuard]);
+            } finally {
+                if (timerId !== null && typeof clearTimeout === "function") {
+                    clearTimeout(timerId);
+                }
             }
-            return result;
         };
 
-        const serverPromises = [];
+        // Store lazy extraction tasks. This lets a selected server run alone;
+        // the other hosts are contacted only if the preferred one fails.
+        const serverTasks = [];
         for (const element of serverElements) {
             const serverIdStr = element.attr('data-server-id');
             if (!serverIdStr) continue;
@@ -1564,13 +1999,17 @@ class DefaultExtension extends MProvider {
             // Cap each server at 15s so a hanging/dead host (e.g. geoblocked
             // videa.hu) can never block the whole isolate. Loser servers simply
             // contribute nothing while the rest resolve.
-            serverPromises.push(withTimeout(
-                extractFromServer(decoded, serverName),
-                `Server ${serverName}`
-            ));
+            serverTasks.push({
+                key: getServerKey(decoded, serverName),
+                label: `Server ${serverName}`,
+                run: () => withTimeout(
+                    extractFromServer(decoded, serverName),
+                    `Server ${serverName}`
+                )
+            });
         }
 
-        // Parse download qualities for Mp4Upload
+        // Parse encrypted download qualities for Mp4Upload and GoFile.
         try {
             const mrMatch = html.match(/_m\s*=\s*\{"r"\s*:\s*"([^"]+)"\}/);
             const tlMatch = html.match(/_t\s*=\s*\{"l"\s*:\s*"([^"]+)"\}/);
@@ -1578,8 +2017,12 @@ class DefaultExtension extends MProvider {
             
             if (mrMatch && tlMatch && sMatch) {
                 const secret = this.base64Decode(mrMatch[1]);
-                const count = parseInt(tlMatch[1], 10);
                 const sList = JSON.parse(sMatch[1]);
+                const declaredCount = parseInt(tlMatch[1], 10);
+                const count = Math.max(
+                    isNaN(declaredCount) ? 0 : declaredCount,
+                    Array.isArray(sList) ? sList.length : 0
+                );
                 
                 const pVars = {};
                 for (let i = 0; i < count; i++) {
@@ -1602,48 +2045,125 @@ class DefaultExtension extends MProvider {
                     return out;
                 };
 
-                const qualityLists = doc.select('ul.quality-list');
+                const normalizeDownloadQuality = (labelText) => {
+                    const label = String(labelText || "").trim();
+                    const lower = label.toLowerCase();
+                    if (lower.includes("1080") || lower.includes("fhd")) return "FHD";
+                    if (lower.includes("720") || /(^|[^a-z])hd([^a-z]|$)/i.test(lower)) return "HD";
+                    if (lower.includes("480") || lower.includes("sd")) return "SD";
+                    if (lower.includes("360")) return "360p";
+                    return label;
+                };
+
+                // Labels improve display names, but they are deliberately not
+                // required for extraction. WitAnime changes its download HTML
+                // more often than the encrypted _s/_p URL registry.
+                const qualityByIndex = {};
+                const qualityLists = doc.select('ul.quality-list') || [];
                 for (const ul of qualityLists) {
                     const firstLi = ul.selectFirst('li');
-                    const labelText = firstLi ? firstLi.text.trim() : "";
-                    let qualityLabel = "";
-                    if (labelText.includes("FHD")) qualityLabel = "FHD";
-                    else if (labelText.includes("HD")) qualityLabel = "HD";
-                    else if (labelText.includes("SD")) qualityLabel = "SD";
-                    else qualityLabel = labelText;
+                    const qualityLabel = normalizeDownloadQuality(
+                        firstLi ? firstLi.text : ""
+                    );
 
                     const downloadLinks = ul.select('a.download-link');
                     for (const link of downloadLinks) {
-                        const spanNotice = link.selectFirst('span.notice');
-                        const hostName = spanNotice ? spanNotice.text.trim().toLowerCase() : "";
-                        if (hostName.includes("mp4upload")) {
-                            const dataIndexStr = link.attr('data-index');
-                            if (dataIndexStr) {
-                                const dataIndex = parseInt(dataIndexStr, 10);
-                                if (dataIndex < count && sList[dataIndex] && pVars[dataIndex]) {
-                                    try {
-                                        const seqDecrypted = decryptWitUrl(sList[dataIndex], secret);
-                                        const seq = JSON.parse(seqDecrypted);
-                                        const chunks = pVars[dataIndex];
-                                        const decryptedChunks = chunks.map(chunk => decryptWitUrl(chunk, secret));
+                        const dataIndexStr = link.attr('data-index');
+                        if (!dataIndexStr) continue;
 
-                                        const arranged = new Array(seq.length);
-                                        for (let j = 0; j < seq.length; j++) {
-                                            arranged[seq[j]] = decryptedChunks[j];
-                                        }
-                                        const finalUrl = arranged.join("");
-                                        if (finalUrl) {
-                                            serverPromises.push(withTimeout(
-                                                extractFromMp4UploadDownload(finalUrl, qualityLabel),
-                                                `Mp4Upload download ${qualityLabel}`
-                                            ));
-                                        }
-                                    } catch (err) {
-                                        console.log(`Decrypt error for index ${dataIndex}: ${err}`);
-                                    }
-                                }
-                            }
+                        const dataIndex = parseInt(dataIndexStr, 10);
+                        if (!isNaN(dataIndex) && dataIndex >= 0 && dataIndex < count) {
+                            qualityByIndex[dataIndex] = qualityLabel;
                         }
+                    }
+                }
+
+                // Some templates place links outside ul.quality-list. Preserve
+                // any quality exposed directly on those anchors when present.
+                const looseDownloadLinks = doc.select('a.download-link') || [];
+                for (const link of looseDownloadLinks) {
+                    const dataIndex = parseInt(link.attr('data-index'), 10);
+                    if (isNaN(dataIndex) || dataIndex < 0 || dataIndex >= count || qualityByIndex[dataIndex]) {
+                        continue;
+                    }
+                    qualityByIndex[dataIndex] = normalizeDownloadQuality(
+                        link.attr('data-quality') ||
+                        link.attr('data-resolution') ||
+                        link.attr('title') ||
+                        ""
+                    );
+                }
+
+                const decodeForInspection = (rawUrl) => {
+                    let value = String(rawUrl || "").trim().replace(/&amp;/g, "&");
+                    for (let attempt = 0; attempt < 2; attempt++) {
+                        try {
+                            const decoded = decodeURIComponent(value);
+                            if (decoded === value) break;
+                            value = decoded;
+                        } catch (e) {
+                            break;
+                        }
+                    }
+                    return value;
+                };
+
+                // Decrypt every registered URL. Provider-name selectors are
+                // intentionally avoided, so GoFile is found even if WitAnime
+                // renames the button or moves it to another HTML container.
+                for (let dataIndex = 0; dataIndex < count; dataIndex++) {
+                    if (!sList[dataIndex] || !pVars[dataIndex]) continue;
+
+                    try {
+                        const seqDecrypted = decryptWitUrl(sList[dataIndex], secret);
+                        const seq = JSON.parse(seqDecrypted);
+                        const chunks = pVars[dataIndex];
+                        const decryptedChunks = chunks.map((chunk) => decryptWitUrl(chunk, secret));
+
+                        const arranged = new Array(seq.length);
+                        for (let j = 0; j < seq.length; j++) {
+                            arranged[seq[j]] = decryptedChunks[j];
+                        }
+
+                        const finalUrl = arranged.join("").trim();
+                        const inspectedUrl = decodeForInspection(finalUrl);
+                        const inspectedUrlLower = inspectedUrl.toLowerCase();
+                        const qualityLabel = qualityByIndex[dataIndex] || "";
+
+                        if (inspectedUrlLower.includes("mp4upload.com")) {
+                            const mp4Match = inspectedUrl.match(
+                                /https?:\/\/(?:www\.)?mp4upload\.com\/[^\s"'<>]+/i
+                            );
+                            const mp4Url = mp4Match ? mp4Match[0] : finalUrl;
+                            serverTasks.push({
+                                key: "mp4upload (download)",
+                                label: `Mp4Upload download ${qualityLabel || dataIndex}`,
+                                run: () => withTimeout(
+                                    extractFromMp4UploadDownload(mp4Url, qualityLabel),
+                                    `Mp4Upload download ${qualityLabel || dataIndex}`
+                                )
+                            });
+                            continue;
+                        }
+
+                        const gofileContentId = this.getGofileContentId(inspectedUrl);
+                        if (gofileContentId) {
+                            const gofileUrl = `https://gofile.io/d/${encodeURIComponent(gofileContentId)}`;
+                            serverTasks.push({
+                                key: "gofile (download)",
+                                label: `GoFile download ${qualityLabel || dataIndex}`,
+                                run: () => withTimeout(
+                                    this.customGofileExtractor(
+                                        gofileUrl,
+                                        "GoFile (Download)",
+                                        qualityLabel
+                                    ),
+                                    `GoFile download ${qualityLabel || dataIndex}`
+                                )
+                            });
+                        }
+                    } catch (err) {
+                        console.log(`Decrypt error for index ${dataIndex}: ${err}`);
                     }
                 }
             }
@@ -1651,19 +2171,40 @@ class DefaultExtension extends MProvider {
             console.log(`Error parsing download section: ${e}`);
         }
 
-        const allResults = await Promise.all(serverPromises);
-        for (const serverVideos of allResults) {
-            if (serverVideos && serverVideos.length) {
-                videos.push(...serverVideos);
+        const runTasks = async (tasks) => {
+            const results = await Promise.all(tasks.map(async (task) => {
+                try {
+                    return await task.run();
+                } catch (e) {
+                    console.log(`${task.label} extraction failed: ${e}`);
+                    return [];
+                }
+            }));
+            const flattened = [];
+            for (const taskVideos of results) {
+                if (taskVideos && taskVideos.length) flattened.push(...taskVideos);
+            }
+            return flattened;
+        };
+
+        if (preferredServerKey === "any server") {
+            videos.push(...await runTasks(serverTasks));
+        } else {
+            const preferredTasks = serverTasks.filter((task) => task.key === preferredServerKey);
+            if (preferredTasks.length > 0) {
+                const preferredVideos = await runTasks(preferredTasks);
+                videos.push(...preferredVideos);
+
+                // A specific server is a fast path, not a hard failure mode.
+                // Fall back to every untried host only when it produced nothing.
+                if (preferredVideos.length === 0) {
+                    const fallbackTasks = serverTasks.filter((task) => task.key !== preferredServerKey);
+                    videos.push(...await runTasks(fallbackTasks));
+                }
+            } else {
+                videos.push(...await runTasks(serverTasks));
             }
         }
-
-        const preferredQuality = String(
-            this.getPreferenceValue("pref_quality", "1080p") || "1080p"
-        );
-        const preferredServer = String(
-            this.getPreferenceValue("pref_server", "Mp4Upload") || "Mp4Upload"
-        );
 
         const getQualityRank = (qualityStr) => {
             const q = String(qualityStr || "").toLowerCase();
